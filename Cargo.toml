@@ -1,0 +1,10 @@
+[package]
+name = "aes67-relay-chunker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tim-Philipp Müller <tim@centricular.com>"]
+license = "MPL-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
