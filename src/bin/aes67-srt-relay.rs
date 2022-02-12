@@ -8,6 +8,104 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+mod rtp_hdr_ext;
+
+use gst::prelude::*;
+use gst_rtp::prelude::RTPHeaderExtensionExt;
+
+// TODO: parse rtsp uri or sdp file from command line arguments
 fn main() {
-    println!("Hello, world!");
+    gst::init().unwrap();
+
+    gst::Element::register(
+        None,
+        "x-rtphdrextptp",
+        gst::Rank::None,
+        rtp_hdr_ext::RTPHeaderExtPTP::static_type(),
+    )
+    .unwrap();
+
+    let main_loop = glib::MainLoop::new(None, false);
+
+    let pipeline = gst::Pipeline::new(None);
+
+    let source = gst::parse_bin_from_description(
+        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks
+        ! audio/x-raw,rate=48000,channels=2
+        ! rtpL24pay",
+        true,
+    )
+    .expect("Error creating input branch")
+    .upcast::<gst::Element>();
+
+    let depayloader = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+
+    // We always re-payload instead of passing through L24 RTP packets as-is
+    // because that makes everything easier in case we want to add an encoder
+    // with larger frame sizes later. Avoids special-casing: we can just use
+    // the same mechanism/code for all scenarios.
+    let payloader = gst::ElementFactory::make("rtpL24pay", None).unwrap();
+    payloader.set_property("min-ptime", 1_000_000i64);
+    payloader.set_property("max-ptime", 1_000_000i64);
+    payloader.set_property("auto-header-extension", false);
+
+    // Set things up to add our RTP header extension data
+    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
+        .unwrap()
+        .downcast::<gst_rtp::RTPHeaderExtension>()
+        .unwrap();
+
+    hdr_ext.set_id(1);
+
+    payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
+
+    let sink = gst::ElementFactory::make("fakesink", None).unwrap();
+    sink.set_property("dump", true);
+
+    pipeline
+        .add_many(&[&source, &depayloader, &payloader, &sink])
+        .unwrap();
+
+    gst::Element::link_many(&[&source, &depayloader, &payloader, &sink]).unwrap();
+
+    pipeline.set_start_time(gst::ClockTime::NONE);
+    pipeline.set_base_time(gst::ClockTime::ZERO);
+
+    let bus = pipeline.bus().unwrap();
+
+    // Any errors will be picked up via the bus handler
+    if let Err(_) = pipeline.set_state(gst::State::Playing) {};
+
+    let main_loop_clone = main_loop.clone();
+
+    bus.add_watch(move |_, msg| {
+        use gst::MessageView;
+
+        let main_loop = &main_loop_clone;
+
+        match msg.view() {
+            MessageView::Eos(..) => main_loop.quit(),
+            MessageView::Error(err) => {
+                println!(
+                    "Error from {:?}: {} ({:?})",
+                    err.src().map(|s| s.path_string()),
+                    err.error(),
+                    err.debug()
+                );
+                main_loop.quit();
+            }
+            _ => (),
+        };
+
+        glib::Continue(true)
+    })
+    .expect("Failed to add bus watch");
+
+    main_loop.run();
+
+    pipeline
+        .set_state(gst::State::Null)
+        .expect("Failed to shut down the pipeline");
+
+    bus.remove_watch().unwrap();
 }
