@@ -7,8 +7,11 @@ name = "aes67-relay-chunker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomic_refcell",
  "glib",
  "gstreamer",
+ "gstreamer-audio",
+ "gstreamer-base",
  "gstreamer-rtp",
  "gstreamer-rtsp-server",
  "once_cell",
@@ -19,6 +22,18 @@ name = "anyhow"
 version = "1.0.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94a45b455c14666b85fc40a019e8ab9eb75e3a124e05494f5397122bc9eb06e0"
+
+[[package]]
+name = "array-init"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6945cc5422176fc5e602e590c2878d2c2acd9a4fe20a4baa7c28022521698ec6"
+
+[[package]]
+name = "atomic_refcell"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73b5e5f48b927f04e952dedc932f31995a65a0bf65ec971c74436e51bf6e970d"
 
 [[package]]
 name = "autocfg"
@@ -199,6 +214,48 @@ dependencies = [
  "paste",
  "pretty-hex",
  "thiserror",
+]
+
+[[package]]
+name = "gstreamer-audio"
+version = "0.19.0"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs#98e12e835a46d5c903b660177ceab8e0432db4fd"
+dependencies = [
+ "array-init",
+ "bitflags",
+ "cfg-if",
+ "glib",
+ "gstreamer",
+ "gstreamer-audio-sys",
+ "gstreamer-base",
+ "libc",
+ "once_cell",
+]
+
+[[package]]
+name = "gstreamer-audio-sys"
+version = "0.19.0"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs#98e12e835a46d5c903b660177ceab8e0432db4fd"
+dependencies = [
+ "glib-sys",
+ "gobject-sys",
+ "gstreamer-base-sys",
+ "gstreamer-sys",
+ "libc",
+ "system-deps",
+]
+
+[[package]]
+name = "gstreamer-base"
+version = "0.19.0"
+source = "git+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs#98e12e835a46d5c903b660177ceab8e0432db4fd"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "glib",
+ "gstreamer",
+ "gstreamer-base-sys",
+ "libc",
 ]
 
 [[package]]
