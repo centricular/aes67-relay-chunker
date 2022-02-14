@@ -94,4 +94,38 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
 
         Ok(8)
     }
+
+    fn read(
+        &self,
+        element: &Self::Type,
+        _read_flags: RTPHeaderExtensionFlags,
+        input_data: &[u8],
+        output: &mut gst::BufferRef,
+    ) -> Result<(), gst::LoggableError> {
+        assert_eq!(input_data.len(), 8); // TODO: nicer error handling
+
+        // FIXME: convert to gst clocktime
+        let pts = u64::from_be_bytes([
+            input_data[0],
+            input_data[1],
+            input_data[2],
+            input_data[3],
+            input_data[4],
+            input_data[5],
+            input_data[6],
+            input_data[7],
+        ]);
+
+        gst_log!(
+            CAT,
+            obj: element,
+            "Read timestamp {:?} duration {:?}",
+            pts,
+            output.duration()
+        );
+
+        // FIXME: actually *do* something with the timestamp we extracted
+
+        Ok(())
+    }
 }
