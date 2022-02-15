@@ -19,6 +19,9 @@ use atomic_refcell::AtomicRefCell;
 use gst::{gst_debug, gst_error, gst_info, gst_log, gst_trace};
 
 // TODO: make configurable
+// FIXME: need to make sure that CHUNK_SAMPLES is a multiple of the encoder
+// output frame size (which is 1024 by default in AAC, unless we add a property
+// to configure it to 960, which is also possible)
 const CHUNK_SAMPLES: u64 = 5 * 48000u64;
 const CHUNK_DURATION: gst::ClockTime = gst::ClockTime::from_seconds(5);
 
@@ -134,7 +137,13 @@ impl ElementImpl for AudioChunker {
     fn pad_templates() -> &'static [gst::PadTemplate] {
         static PAD_TEMPLATES: Lazy<Vec<gst::PadTemplate>> = Lazy::new(|| {
             let caps = gst::Caps::builder("audio/x-raw")
-                .field("format", gst_audio::AUDIO_FORMAT_S24.to_str())
+                .field(
+                    "format",
+                    gst::List::new([
+                        "S16LE", "S16BE", "U16LE", "U16BE", "S24LE", "S24BE", "U24LE", "U24BE",
+                        "S32LE", "S32BE", "U32LE", "U32BE", "F32LE", "F32BE", "F64LE", "F64BE",
+                    ]),
+                )
                 .field("rate", 48_000i32) // TODO: allow range
                 .field("channels", gst::IntRange::new(1, std::i32::MAX))
                 .field("layout", "interleaved")
