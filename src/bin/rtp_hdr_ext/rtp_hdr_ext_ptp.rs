@@ -88,9 +88,7 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
 
         let pts_bytes = pts.to_be_bytes();
 
-        for n in 0..=7 {
-            output_data[n] = pts_bytes[n];
-        }
+        output_data[0..8].copy_from_slice(&pts_bytes[0..8]);
 
         Ok(8)
     }
