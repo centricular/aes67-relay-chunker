@@ -12,7 +12,26 @@ mod audio_chunker;
 mod rtp_hdr_ext;
 
 use gst::prelude::*;
+use gst::{gst_error, gst_info, gst_log, gst_trace};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
+
+use once_cell::sync::Lazy;
+
+use atomic_refcell::AtomicRefCell;
+
+use std::sync::Arc;
+
+static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+    gst::DebugCategory::new(
+        "srt-fragment-enc",
+        gst::DebugColorFlags::empty(),
+        Some("SRT fragment encoder"),
+    )
+});
+
+struct ChunkCollector {
+    adapter: gst_base::UniqueAdapter,
+}
 
 // TODO: parse srt uri from command line arguments
 fn main() {
@@ -91,22 +110,114 @@ fn main() {
 
     depayloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
-    let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
-
     let chunker = gst::ElementFactory::make("x-audiochunker", None).unwrap();
 
-    let sink = gst::ElementFactory::make("fakesink", None).unwrap();
+    let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
+
+    let enc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+
+    let sink = gst::ElementFactory::make("appsink", None).unwrap();
+    sink.set_property("sync", false);
 
     pipeline
-        .add_many(&[&depayloader, &conv, &chunker, &sink])
+        .add_many(&[&depayloader, &chunker, &conv, &enc, &sink])
         .unwrap();
 
     gst::Element::link_many(&[&payloader, &depayloader]).unwrap(); // FIXME
 
-    gst::Element::link_many(&[&depayloader, &conv, &chunker, &sink]).unwrap();
+    gst::Element::link_many(&[&depayloader, &chunker, &conv, &enc, &sink]).unwrap();
 
     pipeline.set_start_time(gst::ClockTime::NONE);
     pipeline.set_base_time(gst::ClockTime::ZERO);
+
+    // Set up AppSink
+    let appsink = sink
+        .dynamic_cast::<gst_app::AppSink>()
+        .expect("Sink element is expected to be an appsink!");
+
+    let chunk_collector = Arc::new(AtomicRefCell::new(ChunkCollector {
+        adapter: gst_base::UniqueAdapter::new(),
+    }));
+
+    let cc_clone = chunk_collector.clone();
+
+    appsink.set_callbacks(
+        gst_app::AppSinkCallbacks::builder()
+            .new_sample(move |appsink| {
+                let mut collector = chunk_collector.borrow_mut();
+
+                let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                let buf = sample.buffer().unwrap().copy();
+                gst_trace!(
+                    CAT,
+                    obj: appsink.upcast_ref::<gst::Element>(),
+                    "{:?}",
+                    buf,
+                );
+                collector.adapter.push(buf);
+                Ok(gst::FlowSuccess::Ok)
+            })
+            .new_event(move |appsink| {
+                let mut collector = cc_clone.borrow_mut();
+
+                let event = appsink.pull_object().unwrap();
+                let ev = event.downcast::<gst::Event>().ok().unwrap();
+
+                let adapter = &mut collector.adapter;
+
+                use gst::EventView;
+
+                match ev.view() {
+                    EventView::CustomDownstream(ev_custom) => {
+                        let s = ev_custom.structure().unwrap();
+                        match s.name() {
+                            "chunk-start" => {
+                                // Should be empty already anyway
+                                adapter.clear();
+                            }
+                            "chunk-end" => {
+                                // Note that currently the chunk-end event is
+                                // only pushed through the audio encoder on
+                                // the next chunk, so we have one chunk delay
+                                // on the output side here until we can work
+                                // around that. (FIXME: even more if there's
+                                // packet loss, although we could probably send
+                                // a gap event or drain the encoder if that
+                                // happens anyway)
+                                let avail = adapter.available();
+
+                                let (pts, distance) = adapter.prev_pts_at_offset(0);
+                                let pts = pts.unwrap();
+                                assert_eq!(distance, 0);
+
+                                let buf = adapter.take_buffer(avail).unwrap();
+                                let map = buf.map_readable();
+                                let buf_data = map.unwrap();
+                                let digest = md5::compute(buf_data.as_slice());
+
+                                println!("{:?}: {:?}", pts, digest);
+
+                                gst_info!(
+                                    CAT,
+                                    obj: appsink.upcast_ref::<gst::Element>(),
+                                    "chunk @ pts {:?}, digest {:?}, size {} bytes",
+                                    pts,
+                                    digest,
+                                    avail,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+
+                true
+            })
+            .build(),
+    );
+
+    // Bus main loop
 
     let bus = pipeline.bus().unwrap();
 
