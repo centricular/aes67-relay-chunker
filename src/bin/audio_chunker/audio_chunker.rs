@@ -423,6 +423,17 @@ impl AudioChunker {
             outbuf_ref.set_pts(chunk_pts);
             outbuf_ref.set_dts(None);
 
+            // Push some serialised custom events before/after each chunk,
+            // so we can still determine chunk boundaries after the audio
+            // encoder (which will output smaller frames) and muxer, and
+            // collect all coded packets belonging to the same input chunk.
+            let s = gst::Structure::builder("chunk-start")
+                .field("offset", abs_off)
+                .field("pts", chunk_pts)
+                .build();
+
+            self.srcpad.push_event(gst::event::CustomDownstream::new(s));
+
             // TODO: put continuity counter on outgoing chunks, or flag all
             // buffers with a continuity counter value < 5 as DROPPABLE or
             // something, so that we can later drop the first few encoded
@@ -431,6 +442,13 @@ impl AudioChunker {
             gst_log!(CAT, obj: element, "Pushing buffer {:?}", outbuf);
 
             self.srcpad.push(outbuf)?;
+
+            let s = gst::Structure::builder("chunk-end")
+                .field("offset", abs_off)
+                .field("pts", chunk_pts)
+                .build();
+
+            self.srcpad.push_event(gst::event::CustomDownstream::new(s));
 
             let samples_left = state.adapter.available() as u64 / state.info.bpf() as u64;
 
