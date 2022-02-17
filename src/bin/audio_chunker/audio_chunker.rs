@@ -22,8 +22,7 @@ use gst::{gst_debug, gst_error, gst_info, gst_log, gst_trace};
 // FIXME: need to make sure that CHUNK_SAMPLES is a multiple of the encoder
 // output frame size (which is 1024 by default in AAC, unless we add a property
 // to configure it to 960, which is also possible)
-const CHUNK_SAMPLES: u64 = 5 * 48000u64;
-const CHUNK_DURATION: gst::ClockTime = gst::ClockTime::from_seconds(5);
+const CHUNK_SAMPLES: u64 = 5 * 48128; // FIXME 5 * 48000u64;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
@@ -378,7 +377,7 @@ impl AudioChunker {
         while state.adapter.available() >= chunk_size {
             let (chunk_start_off, chunk_end_off, _) = state.cur_chunk.unwrap();
 
-            gst_debug!(
+            gst_info!(
                 CAT,
                 obj: element,
                 "Completed chunk: {}-{} continuity={}",
@@ -409,9 +408,17 @@ impl AudioChunker {
 
             let chunk_pts = chunk_start_off
                 .mul_div_round(*gst::ClockTime::SECOND, state.info.rate() as u64)
-                .map(gst::ClockTime::from_nseconds);
+                .map(gst::ClockTime::from_nseconds)
+                .unwrap();
 
-            outbuf_ref.set_duration(CHUNK_DURATION);
+            let chunk_end_pts = chunk_end_off
+                .mul_div_round(*gst::ClockTime::SECOND, state.info.rate() as u64)
+                .map(gst::ClockTime::from_nseconds)
+                .unwrap();
+
+            let chunk_duration = chunk_end_pts - chunk_pts;
+
+            outbuf_ref.set_duration(chunk_duration);
             outbuf_ref.set_pts(chunk_pts);
             outbuf_ref.set_dts(None);
 
@@ -492,10 +499,24 @@ impl AudioChunker {
                 let mut peer_query = gst::query::Latency::new();
                 if self.sinkpad.peer_query(&mut peer_query) {
                     let (live, min_latency, max_latency) = peer_query.result();
+
+                    // FIXME: not entirely correct, since we're not guaranteed
+                    // to be in the streaming thread, so AtomicRefCell might assert
+                    let state_guard = self.state.borrow();
+                    let sample_rate = match *state_guard {
+                        None => 48000u32, // default
+                        Some(ref state) => state.info.rate(),
+                    };
+
+                    let chunk_duration = CHUNK_SAMPLES
+                        .mul_div_round(*gst::ClockTime::SECOND, sample_rate as u64)
+                        .map(gst::ClockTime::from_nseconds)
+                        .unwrap();
+
                     q.set(
                         live,
-                        min_latency + CHUNK_DURATION,
-                        max_latency.opt_add(CHUNK_DURATION),
+                        min_latency + chunk_duration,
+                        max_latency.opt_add(chunk_duration),
                     );
                     true
                 } else {
