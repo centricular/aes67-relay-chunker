@@ -14,7 +14,7 @@ use gst::subclass::prelude::*;
 
 use once_cell::sync::Lazy;
 
-use atomic_refcell::AtomicRefCell;
+use std::sync::Mutex;
 
 use gst::{gst_debug, gst_error, gst_info, gst_log, gst_trace};
 
@@ -59,7 +59,7 @@ impl State {
 pub struct AudioChunker {
     srcpad: gst::Pad,
     sinkpad: gst::Pad,
-    state: AtomicRefCell<Option<State>>,
+    state: Mutex<Option<State>>,
 }
 
 #[glib::object_subclass]
@@ -103,7 +103,7 @@ impl ObjectSubclass for AudioChunker {
         Self {
             sinkpad,
             srcpad,
-            state: AtomicRefCell::new(None),
+            state: Mutex::new(None),
         }
     }
 }
@@ -181,7 +181,7 @@ impl ElementImpl for AudioChunker {
         match transition {
             gst::StateChange::PausedToReady => {
                 // Drop state
-                *self.state.borrow_mut() = None;
+                let _ = self.state.lock().unwrap().take();
             }
             _ => (),
         }
@@ -217,7 +217,8 @@ impl AudioChunker {
     ) -> Result<gst::FlowSuccess, gst::FlowError> {
         gst_log!(CAT, obj: element, "Handling buffer {:?}", buffer);
 
-        let mut state_guard = self.state.borrow_mut();
+        let mut state_guard = self.state.lock().unwrap();
+
         let state = match *state_guard {
             None => {
                 gst_error!(CAT, obj: element, "Not negotiated yet");
@@ -465,12 +466,14 @@ impl AudioChunker {
                     }
                 };
 
-                let mut state = self.state.borrow_mut();
-                if let Some(ref mut _state) = &mut *state {
+                let state_guard = self.state.lock();
+                let mut state = state_guard.unwrap();
+
+                if state.is_some() {
                     unimplemented!("Caps changes are not supported!");
                 }
+
                 *state = Some(State::new(info));
-                drop(state);
             }
             EventView::Eos(_) => {
                 unimplemented!("EOS");
@@ -494,18 +497,19 @@ impl AudioChunker {
         use gst::QueryViewMut;
 
         gst_log!(CAT, obj: pad, "Handling query {:?}", query);
+
         match query.view_mut() {
             QueryViewMut::Latency(q) => {
                 let mut peer_query = gst::query::Latency::new();
                 if self.sinkpad.peer_query(&mut peer_query) {
                     let (live, min_latency, max_latency) = peer_query.result();
 
-                    // FIXME: not entirely correct, since we're not guaranteed
-                    // to be in the streaming thread, so AtomicRefCell might assert
-                    let state_guard = self.state.borrow();
-                    let sample_rate = match *state_guard {
-                        None => 48000u32, // default
-                        Some(ref state) => state.info.rate(),
+                    let state_guard = self.state.lock().unwrap();
+
+                    let sample_rate = if let Some(state) = state_guard.as_ref() {
+                        state.info.rate()
+                    } else {
+                        48000u32
                     };
 
                     let chunk_duration = CHUNK_SAMPLES
