@@ -23,7 +23,9 @@ fn main_loop() -> Result<(), Error> {
 
     // TODO: use more interesting audio signal than wave=ticks
     factory.set_launch(
-        "audiotestsrc wave=ticks samplesperbuffer=48 ! audio/x-raw,rate=48000,channels=2 ! rtpL24pay name=pay0",
+        "audiotestsrc wave=ticks samplesperbuffer=48
+        ! audio/x-raw,rate=48000,channels=2
+        ! rtpL24pay min-ptime=1000000 max-ptime=1000000 name=pay0",
     );
 
     // Each client should get the exact same live data/stream
