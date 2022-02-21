@@ -122,7 +122,10 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
             output.duration()
         );
 
-        // FIXME: actually *do* something with the timestamp we extracted
+        // Just override the output timestamp (KISS). We're not syncing against
+        // any clocks in the receiver pipeline, so that's simpler than faffing
+        // around with TimeReferenceMetas and such.
+        output.set_pts(gst::ClockTime::from_nseconds(pts));
 
         Ok(())
     }
