@@ -10,11 +10,115 @@
 
 mod rtp_hdr_ext;
 
+use clap::{Arg, Command};
+
 use gst::prelude::*;
 use gst_rtp::prelude::RTPHeaderExtensionExt;
 
-// TODO: parse rtsp uri or sdp file from command line arguments
+use url::Url;
+
+fn create_test_input() -> gst::Element {
+    gst::parse_bin_from_description(
+        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks
+        ! capsfilter caps=audio/x-raw,rate=48000,channels=2",
+        true,
+    )
+    .expect("Error creating test input branch")
+    .upcast::<gst::Element>()
+}
+
+// We only support RTSP with L24 audio for now (KISS)
+fn create_rtsp_input(rtsp_url: Url) -> gst::Element {
+    let bin = gst::Bin::new(Some("rtsp-source"));
+
+    let rtspsrc = gst::ElementFactory::make("rtspsrc", None).unwrap();
+    rtspsrc.set_property("location", rtsp_url.as_str());
+    rtspsrc.set_property("ntp-sync", true);
+    rtspsrc.set_property_from_str("buffer-mode", "synced");
+    rtspsrc.set_property("latency", 100u32);
+    rtspsrc.set_property("do-rtcp", false);
+
+    let depayload = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+
+    let src_pad = depayload.static_pad("src").unwrap();
+
+    bin.add_many(&[&rtspsrc, &depayload]).unwrap();
+
+    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+        .unwrap()
+        .upcast::<gst::Pad>();
+
+    bin.add_pad(&ghostpad).unwrap();
+
+    rtspsrc.connect_pad_added(move |_src, new_src_pad| {
+        let sink_pad = depayload
+            .static_pad("sink")
+            .expect("Failed to get static sink pad from convert");
+
+        // TODO: proper error handling. For now we panic if we don't get L24
+        new_src_pad.link(&sink_pad).unwrap();
+    });
+
+    bin.upcast::<gst::Element>()
+}
+
+fn create_null_output() -> gst::Element {
+    let sink = gst::ElementFactory::make("fakesink", None).unwrap();
+    sink
+}
+
+fn create_srt_output(srt_url: Url) -> gst::Element {
+    let sink = gst::Element::make_from_uri(gst::URIType::Sink, srt_url.as_str(), None).unwrap();
+    //let sink = gst::ElementFactory::make("srtsink", None).unwrap();
+    //sink.set_property("uri", "srt://127.0.0.1:7001");
+    sink.set_property("sync", false);
+    //sink.set_property("wait-for-connection", false);
+    sink
+}
+
 fn main() {
+    // Command line arguments
+    let matches = Command::new("aes67-srt-relay")
+        .version("0.1")
+        .author("Tim-Philipp Müller <tim centricular com>")
+        .about("AES67 to SRT relay")
+        .arg(
+            Arg::new("input-uri")
+                .required(true)
+                .help("Input URI, e.g. rtsp://127.0.0.1:8554/audio or test://"),
+        )
+        .arg(
+            Arg::new("output-uri")
+                .required(true)
+                .help("Output URI, e.g. srt://127.0.0.1:7001"),
+        )
+        .after_help(
+            "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
+and send it to a cloud server via SRT for chunking + encoding.",
+        )
+        .get_matches();
+
+    let input_uri = matches.value_of("input-uri").unwrap();
+
+    let input_url = url::Url::parse(input_uri)
+        .or_else(|err| {
+            eprintln!(
+                "Please provide a valid input URI, e.g. rtsp://127.0.0.1:8554/audio or test://"
+            );
+            return Err(err);
+        })
+        .unwrap();
+
+    let output_uri = matches.value_of("output-uri").unwrap();
+
+    let output_url = url::Url::parse(output_uri)
+        .or_else(|err| {
+            eprintln!("Please provide a valid output URI, e.g. srt://127.0.0.1:7001 or null://");
+            return Err(err);
+        })
+        .unwrap();
+
+    // Init + Plugin Registration
     gst::init().unwrap();
 
     gst::Element::register(
@@ -25,20 +129,19 @@ fn main() {
     )
     .unwrap();
 
+    // Pipeline
     let main_loop = glib::MainLoop::new(None, false);
 
     let pipeline = gst::Pipeline::new(None);
 
-    let source = gst::parse_bin_from_description(
-        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks
-        ! audio/x-raw,rate=48000,channels=2
-        ! rtpL24pay",
-        true,
-    )
-    .expect("Error creating input branch")
-    .upcast::<gst::Element>();
+    let source = match input_url.scheme() {
+        "test" => create_test_input(),
+        "rtsp" => create_rtsp_input(input_url),
+        scheme => unimplemented!("Unhandled protocol {}", scheme),
+    };
 
-    let depayloader = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+    // For good measure, shouldn't be needed
+    let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
     // We always re-payload instead of passing through L24 RTP packets as-is
     // because that makes everything easier in case we want to add an encoder
@@ -59,14 +162,17 @@ fn main() {
 
     payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
-    let sink = gst::ElementFactory::make("fakesink", None).unwrap();
-    sink.set_property("dump", true);
+    let sink = match output_url.scheme() {
+        "null" => create_null_output(),
+        "srt" => create_srt_output(output_url),
+        scheme => unimplemented!("Unhandled output protocol {}", scheme),
+    };
 
     pipeline
-        .add_many(&[&source, &depayloader, &payloader, &sink])
+        .add_many(&[&source, &conv, &payloader, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&source, &depayloader, &payloader, &sink]).unwrap();
+    gst::Element::link_many(&[&source, &conv, &payloader, &sink]).unwrap();
 
     pipeline.set_start_time(gst::ClockTime::NONE);
     pipeline.set_base_time(gst::ClockTime::ZERO);
