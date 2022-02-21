@@ -219,7 +219,7 @@ impl AudioChunker {
 
         let mut state_guard = self.state.lock().unwrap();
 
-        let state = match *state_guard {
+        let mut state = match *state_guard {
             None => {
                 gst_error!(CAT, obj: element, "Not negotiated yet");
                 return Err(gst::FlowError::NotNegotiated);
@@ -423,6 +423,10 @@ impl AudioChunker {
             outbuf_ref.set_pts(chunk_pts);
             outbuf_ref.set_dts(None);
 
+            // Drop state lock before we push out events/buffers
+            drop(state);
+            drop(state_guard);
+
             // Push some serialised custom events before/after each chunk,
             // so we can still determine chunk boundaries after the audio
             // encoder (which will output smaller frames) and muxer, and
@@ -449,6 +453,10 @@ impl AudioChunker {
                 .build();
 
             self.srcpad.push_event(gst::event::CustomDownstream::new(s));
+
+            // Re-acquire state
+            state_guard = self.state.lock().unwrap();
+            state = state_guard.as_mut().unwrap();
 
             let samples_left = state.adapter.available() as u64 / state.info.bpf() as u64;
 
