@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use gst_rtsp_server::prelude::*;
+use gst_rtsp_server::RTSPPublishClockMode;
 
 use anyhow::Error;
 
@@ -34,6 +35,17 @@ fn main_loop() -> Result<(), Error> {
     // Disable RTCP (esp. Sender Reports)
     factory.set_enable_rtcp(false);
 
+    let ntp_clock = gst_net::NtpClock::new(None, "pool.ntp.org", 123, gst::ClockTime::from_nseconds(0));
+
+    // Wait for clock to be synced
+    ntp_clock.wait_for_sync(None).unwrap();
+
+    //let ntp_clock = gst_net::PtpClock::new(None, 1);
+    factory.set_clock(Some(&ntp_clock));
+
+    // Set RFC7273 mode, publish clock and offset
+    factory.set_publish_clock_mode(RTSPPublishClockMode::ClockAndOffset);
+
     mounts.add_factory("/audio", &factory);
 
     // Attach the server to the default main context
@@ -42,6 +54,10 @@ fn main_loop() -> Result<(), Error> {
     println!(
         "Stream ready at rtsp://127.0.0.1:{}/audio",
         server.bound_port()
+    );
+
+    println!(
+        "WARNING: rfc7273 sync does not seem functional at the moment, needs investigating!"
     );
 
     // Start the main loop
