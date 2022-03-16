@@ -57,11 +57,15 @@ fn create_test_input() -> gst::Element {
 fn create_rtsp_input(rtsp_url: Url) -> gst::Element {
     let bin = gst::Bin::new(Some("rtsp-source"));
 
+    // Requires:
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955
+    //   (rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations)
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964
+    //   (rtpjitterbuffer: add "add-reference-timestamp-meta" property)
     let rtspsrc = gst::ElementFactory::make("rtspsrc", None).unwrap();
     rtspsrc.set_property("location", rtsp_url.as_str());
-    rtspsrc.set_property("ntp-sync", true);
-    rtspsrc.set_property_from_str("buffer-mode", "synced");
-    rtspsrc.set_property("latency", 100u32);
+    rtspsrc.set_property("rfc7273-sync", true);
+    rtspsrc.set_property("add-reference-timestamp-meta", true);
     rtspsrc.set_property("do-rtcp", false);
 
     let depayload = gst::ElementFactory::make("rtpL24depay", None).unwrap();
