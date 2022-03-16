@@ -167,7 +167,7 @@ fn main() {
         .arg(
             Arg::new("output-uri")
                 .required(true)
-                .help("Output URI, e.g. srt://127.0.0.1:7001"),
+                .help("Output URI, e.g. srt://127.0.0.1:7001 or null://"),
         )
         .after_help(
             "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
