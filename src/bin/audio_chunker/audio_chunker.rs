@@ -1,5 +1,5 @@
 // Raw audio chunker - creates chunks of raw audio aligned based on absolute timestamps
-////
+//
 // Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
 //
 // This Source Code Form is subject to the terms of the Mozilla Public License, v2.0.
