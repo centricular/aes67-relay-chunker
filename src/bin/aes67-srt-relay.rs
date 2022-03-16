@@ -39,12 +39,7 @@ fn create_test_input() -> gst::Element {
         if let Some(gst::PadProbeData::Buffer(ref mut buffer)) = probe_info.data {
             let pts = buffer.pts().unwrap();
 
-            ReferenceTimestampMeta::add(
-                buffer.make_mut(),
-                &ts_meta_ref,
-                pts,
-                ClockTime::NONE,
-            );
+            ReferenceTimestampMeta::add(buffer.make_mut(), &ts_meta_ref, pts, ClockTime::NONE);
         }
 
         gst::PadProbeReturn::Ok
