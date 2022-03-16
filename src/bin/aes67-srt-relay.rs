@@ -221,6 +221,20 @@ and send it to a cloud server via SRT for chunking + encoding.",
     // For good measure, shouldn't be needed
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
+    // Add a buffer probe to drop all buffers without GstReferenceTimestampMeta,
+    // ie. before we have achieved PTP clock sync.
+    let src_pad = conv.static_pad("src").unwrap();
+    src_pad.add_probe(gst::PadProbeType::BUFFER, |_, probe_info| {
+        if let Some(gst::PadProbeData::Buffer(ref buffer)) = probe_info.data {
+            if buffer.meta::<gst::meta::ReferenceTimestampMeta>().is_none() {
+                println!("No PTP sync yet, dropping buffer");
+                return gst::PadProbeReturn::Drop;
+            }
+        }
+
+        gst::PadProbeReturn::Ok
+    });
+
     // We always re-payload instead of passing through L24 RTP packets as-is
     // because that makes everything easier in case we want to add an encoder
     // with larger frame sizes later. Avoids special-casing: we can just use
