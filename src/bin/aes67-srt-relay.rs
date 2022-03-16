@@ -169,11 +169,19 @@ fn main() {
                 .required(true)
                 .help("Output URI, e.g. srt://127.0.0.1:7001 or null://"),
         )
+        .arg(
+            Arg::new("silent")
+                .short('s')
+                .long("silent")
+                .help("Don't print out buffer checksums every second"),
+        )
         .after_help(
             "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
 and send it to a cloud server via SRT for chunking + encoding.",
         )
         .get_matches();
+
+    let silent = matches.is_present("silent");
 
     let input_uri = matches.value_of("input-uri").unwrap();
 
@@ -224,11 +232,41 @@ and send it to a cloud server via SRT for chunking + encoding.",
     // Add a buffer probe to drop all buffers without GstReferenceTimestampMeta,
     // ie. before we have achieved PTP clock sync.
     let src_pad = conv.static_pad("src").unwrap();
-    src_pad.add_probe(gst::PadProbeType::BUFFER, |_, probe_info| {
+    src_pad.add_probe(gst::PadProbeType::BUFFER, move |_, probe_info| {
         if let Some(gst::PadProbeData::Buffer(ref buffer)) = probe_info.data {
-            if buffer.meta::<gst::meta::ReferenceTimestampMeta>().is_none() {
-                println!("No PTP sync yet, dropping buffer");
-                return gst::PadProbeReturn::Drop;
+            match buffer.meta::<gst::meta::ReferenceTimestampMeta>() {
+                Some(ref meta) => {
+                    let abs_ts = meta.timestamp();
+
+                    let sample_rate = 48000; // FIXME: don't hardcode
+                    let samples_per_buffer = 48; // 1ms, FIXME: don't hardcode
+
+                    // Convert to an absolute sample offset
+                    let abs_off = abs_ts
+                        .nseconds()
+                        .mul_div_floor(sample_rate as u64, *gst::ClockTime::SECOND)
+                        .unwrap();
+
+                    // Filter the first buffer in each second
+                    let samples_into_second = abs_off % sample_rate;
+
+                    if !silent && samples_into_second < samples_per_buffer {
+                        let map = buffer.map_readable();
+                        let buf_data = map.unwrap();
+                        let digest = md5::compute(buf_data.as_slice());
+
+                        println!(
+                            "Buffer @ {:#?} offset {:?} hash {:?}",
+                            abs_ts, abs_off, digest
+                        );
+                    }
+                }
+                None => {
+                    if !silent {
+                        println!("No PTP sync yet, dropping buffer");
+                    }
+                    return gst::PadProbeReturn::Drop;
+                }
             }
         }
 
