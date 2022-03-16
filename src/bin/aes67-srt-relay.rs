@@ -48,6 +48,58 @@ fn create_test_input() -> gst::Element {
     test_input.upcast::<gst::Element>()
 }
 
+// We only support L24 audio for now, and assume PTP clocking is signalled (KISS)
+fn create_sdp_input(sdp_url: Url) -> gst::Element {
+    let bin = gst::Bin::new(Some("sdp-source"));
+
+    let sdpsrc = gst::ElementFactory::make("sdpsrc", None).unwrap();
+    sdpsrc.set_property("location", sdp_url.as_str());
+
+    // sdpsrc doesn't proxy rtpbin/rtpjitterbuffer properties
+    //
+    // Requires:
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1924
+    //   (sdpdemux: add media attribute to caps to fix ptp clock handling)
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955
+    //   (rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations)
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964
+    //   (rtpjitterbuffer: add "add-reference-timestamp-meta" property)
+    sdpsrc
+        .dynamic_cast_ref::<gst::Bin>()
+        .unwrap()
+        .connect_deep_element_added(move |_sdpsrc, _bin, new_element| {
+            if let Some(factory) = new_element.factory() {
+                if factory.name() == "rtpbin" {
+                    new_element.set_property("rfc7273-sync", true);
+                    new_element.set_property("add-reference-timestamp-meta", true);
+                }
+            }
+        });
+
+    let depayload = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+
+    let src_pad = depayload.static_pad("src").unwrap();
+
+    bin.add_many(&[&sdpsrc, &depayload]).unwrap();
+
+    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+        .unwrap()
+        .upcast::<gst::Pad>();
+
+    bin.add_pad(&ghostpad).unwrap();
+
+    sdpsrc.connect_pad_added(move |_src, new_src_pad| {
+        let sink_pad = depayload
+            .static_pad("sink")
+            .expect("Failed to get static sink pad from RTP depayloader");
+
+        // TODO: proper error handling. For now we panic if we don't get L24
+        new_src_pad.link(&sink_pad).unwrap();
+    });
+
+    bin.upcast::<gst::Element>()
+}
+
 // We only support RTSP with L24 audio for now (KISS)
 fn create_rtsp_input(rtsp_url: Url) -> gst::Element {
     let bin = gst::Bin::new(Some("rtsp-source"));
@@ -128,7 +180,7 @@ and send it to a cloud server via SRT for chunking + encoding.",
     let input_url = url::Url::parse(input_uri)
         .or_else(|err| {
             eprintln!(
-                "Please provide a valid input URI, e.g. rtsp://127.0.0.1:8554/audio or test://"
+                "Please provide a valid input URI, e.g. sdp:///path/to/foo.sdp or rtsp://127.0.0.1:8554/audio or test://"
             );
             return Err(err);
         })
@@ -160,8 +212,9 @@ and send it to a cloud server via SRT for chunking + encoding.",
     let pipeline = gst::Pipeline::new(None);
 
     let source = match input_url.scheme() {
-        "test" => create_test_input(),
         "rtsp" => create_rtsp_input(input_url),
+        "sdp" => create_sdp_input(input_url),
+        "test" => create_test_input(),
         scheme => unimplemented!("Unhandled protocol {}", scheme),
     };
 
