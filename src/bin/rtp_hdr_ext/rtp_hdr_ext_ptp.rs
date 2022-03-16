@@ -76,7 +76,11 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
     ) -> Result<usize, gst::LoggableError> {
         assert!(output_data.len() >= 8);
 
-        let pts = output.pts().unwrap();
+        let pts = match output.meta::<gst::meta::ReferenceTimestampMeta>() {
+            Some(meta) => meta.timestamp(),
+            // No timestamp meta means no PTP clock sync yet
+            None => return Err(gst::loggable_error!(gst::CAT_RUST, "No PTP sync yet")),
+        };
 
         gst_log!(
             CAT,
