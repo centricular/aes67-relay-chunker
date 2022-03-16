@@ -13,18 +13,44 @@ mod rtp_hdr_ext;
 use clap::{Arg, Command};
 
 use gst::prelude::*;
+use gst::{Caps, ClockTime, ReferenceTimestampMeta};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
 
 use url::Url;
 
 fn create_test_input() -> gst::Element {
-    gst::parse_bin_from_description(
-        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks
+    let test_input = gst::parse_bin_from_description(
+        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks name=testsrc
         ! capsfilter caps=audio/x-raw,rate=48000,channels=2",
         true,
     )
-    .expect("Error creating test input branch")
-    .upcast::<gst::Element>()
+    .expect("Error creating test input branch");
+
+    let testsrc = test_input.by_name("testsrc").unwrap();
+
+    // Get the audiotestsrc's source pad
+    let src_pad = testsrc.static_pad("src").unwrap();
+
+    // Add a buffer probe to the pad so we can decorate buffers with
+    // GstReferenceTimestampMetas which the RTP Header Extension writer
+    // will look for (in the SDP/RTSP case rtpjitterbuffer adds these)
+    let ts_meta_ref = Caps::builder("timestamp/x-systemclock").build();
+    src_pad.add_probe(gst::PadProbeType::BUFFER, move |_, probe_info| {
+        if let Some(gst::PadProbeData::Buffer(ref mut buffer)) = probe_info.data {
+            let pts = buffer.pts().unwrap();
+
+            ReferenceTimestampMeta::add(
+                buffer.make_mut(),
+                &ts_meta_ref,
+                pts,
+                ClockTime::NONE,
+            );
+        }
+
+        gst::PadProbeReturn::Ok
+    });
+
+    test_input.upcast::<gst::Element>()
 }
 
 // We only support RTSP with L24 audio for now (KISS)
