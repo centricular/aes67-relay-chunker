@@ -175,6 +175,13 @@ fn main() {
                 .long("silent")
                 .help("Don't print out buffer checksums every second"),
         )
+        .arg(
+            Arg::new("drop-probability")
+                .short('d')
+                .long("drop-probability")
+                .help("Drop probability in packets per million")
+                .takes_value(true),
+        )
         .after_help(
             "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
 and send it to a cloud server via SRT for chunking + encoding.",
@@ -225,6 +232,15 @@ and send it to a cloud server via SRT for chunking + encoding.",
         "test" => create_test_input(),
         scheme => unimplemented!("Unhandled protocol {}", scheme),
     };
+
+    // For simulating packet drops (not very sophisticated, maybe netsim would be better?)
+    let id = gst::ElementFactory::make("identity", None).unwrap();
+    if matches.is_present("drop-probability") {
+        let p_drop_ppm: u32 = matches.value_of_t("drop-probability").unwrap();
+        let p: f32 = p_drop_ppm as f32 / 1_000_000.0f32;
+        println!("Configuring packet drop probability to {}!", p);
+        id.set_property("drop-probability", p);
+    }
 
     // For good measure, shouldn't be needed
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
@@ -299,10 +315,10 @@ and send it to a cloud server via SRT for chunking + encoding.",
     };
 
     pipeline
-        .add_many(&[&source, &conv, &payloader, &sink])
+        .add_many(&[&source, &id, &conv, &payloader, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&source, &conv, &payloader, &sink]).unwrap();
+    gst::Element::link_many(&[&source, &id, &conv, &payloader, &sink]).unwrap();
 
     pipeline.set_start_time(gst::ClockTime::NONE);
     pipeline.set_base_time(gst::ClockTime::ZERO);
