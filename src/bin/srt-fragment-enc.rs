@@ -133,6 +133,14 @@ fn main() {
                 .required(true)
                 .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener"),
         )
+        .arg(
+            Arg::new("encoding")
+                .short('e')
+                .long("encoding")
+                .help("Encoding of assembled audio chunks")
+                .possible_values(["aac-fdk", "aac-vo", "flac", "none"])
+                .default_value("aac-fdk"),
+        )
         .after_help(
             "Receives an RTP-packetised audio stream with embedded PTP timestamps through
 SRT, encodes it and then fragments it into chunks along absolute timestamp boundaries
@@ -198,7 +206,19 @@ for reproducibility",
 
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
-    let enc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+    let encoding = matches.value_of("encoding").unwrap();
+
+    let enc = match encoding {
+        "aac-fdk" => gst::ElementFactory::make("fdkaacenc", None).unwrap(),
+        "aac-vo" => gst::ElementFactory::make("voaacenc", None).unwrap(),
+        "flac" => {
+            let flacenc = gst::ElementFactory::make("flacenc", None).unwrap();
+            flacenc.set_property("blocksize", 1024u32); // FIXME: make configurable
+            flacenc
+        }
+        "none" => gst::ElementFactory::make("identity", None).unwrap(),
+        _ => unreachable!(),
+    };
 
     let sink = gst::ElementFactory::make("appsink", None).unwrap();
     sink.set_property("sync", false);
