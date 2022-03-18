@@ -11,8 +11,10 @@
 mod audio_chunker;
 mod rtp_hdr_ext;
 
+use clap::{Arg, Command};
+
 use gst::prelude::*;
-use gst::{gst_error, gst_info, gst_log, gst_trace};
+use gst::{gst_info, gst_trace};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
 
 use once_cell::sync::Lazy;
@@ -20,6 +22,8 @@ use once_cell::sync::Lazy;
 use atomic_refcell::AtomicRefCell;
 
 use std::sync::Arc;
+
+use url::Url;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
@@ -33,8 +37,121 @@ struct ChunkCollector {
     adapter: gst_base::UniqueAdapter,
 }
 
-// TODO: parse srt uri from command line arguments
+fn create_srt_input(srt_url: &Url) -> gst::Element {
+    let bin = gst::Bin::new(Some("srt-source"));
+
+    let src = gst::Element::make_from_uri(gst::URIType::Src, srt_url.as_str(), None).unwrap();
+    //src.set_property("latency", 125);
+    //src.set_property("wait-for-connection", false);
+
+    let capsfilter = gst::ElementFactory::make("capsfilter", None).unwrap();
+
+    // maybe we should use rtpgdp payloading?
+    capsfilter.set_property(
+        "caps",
+        gst::Caps::builder("application/x-rtp")
+            .field("media", "audio")
+            .field("clock-rate", 48_000i32) // FIXME: hardcoded
+            .field("channels", 2i32) // FIXME: hardcoded
+            .build(),
+    );
+
+    let src_pad = capsfilter.static_pad("src").unwrap();
+
+    bin.add_many(&[&src, &capsfilter]).unwrap();
+
+    gst::Element::link_many(&[&src, &capsfilter]).unwrap();
+
+    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+        .unwrap()
+        .upcast::<gst::Pad>();
+
+    bin.add_pad(&ghostpad).unwrap();
+
+    bin.upcast::<gst::Element>()
+}
+
+// Not sure what the point of this test input is
+fn create_test_input() -> gst::Element {
+    let bin = gst::Bin::new(Some("test-source"));
+
+    let src = gst::ElementFactory::make("audiotestsrc", None).unwrap();
+    src.set_property("is-live", true);
+    src.set_property("samplesperbuffer", 48i32);
+    src.set_property_from_str("wave", "ticks");
+
+    // FIXME: add ReferenceTimestampMeta
+
+    let capsfilter = gst::ElementFactory::make("capsfilter", None).unwrap();
+
+    capsfilter.set_property(
+        "caps",
+        gst::Caps::builder("audio/x-raw")
+            .field("clock-rate", 48_000i32)
+            .field("channels", 2i32)
+            .build(),
+    );
+
+    let payloader = gst::ElementFactory::make("rtpL24pay", None).unwrap();
+    payloader.set_property("min-ptime", 1_000_000i64);
+    payloader.set_property("max-ptime", 1_000_000i64);
+    payloader.set_property("auto-header-extension", false);
+
+    // Set things up to add our RTP header extension data
+    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
+        .unwrap()
+        .downcast::<gst_rtp::RTPHeaderExtension>()
+        .unwrap();
+
+    hdr_ext.set_id(1);
+
+    payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
+
+    bin.add_many(&[&src, &capsfilter, &payloader]).unwrap();
+
+    gst::Element::link_many(&[&src, &capsfilter, &payloader]).unwrap();
+
+    let src_pad = payloader.static_pad("src").unwrap();
+
+    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+        .unwrap()
+        .upcast::<gst::Pad>();
+
+    bin.add_pad(&ghostpad).unwrap();
+
+    bin.upcast::<gst::Element>()
+}
+
 fn main() {
+    // Command line arguments
+    let matches = Command::new("srt-fragment-encoder")
+        .version("0.1")
+        .author("Tim-Philipp Müller <tim centricular com>")
+        .about("SRT receiver and fragment encoder")
+        .arg(
+            Arg::new("input-uri")
+                .required(true)
+                .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener"),
+        )
+        .after_help(
+            "Receives an RTP-packetised audio stream with embedded PTP timestamps through
+SRT, encodes it and then fragments it into chunks along absolute timestamp boundaries
+for reproducibility",
+        )
+        .get_matches();
+
+    let input_uri = matches.value_of("input-uri").unwrap();
+
+    let input_url = url::Url::parse(input_uri)
+        .or_else(|err| {
+            eprintln!(
+                "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener or test://"
+            );
+            return Err(err);
+        })
+        .unwrap();
+
+    // Init + Plugin Registration
     gst::init().unwrap();
 
     gst::Element::register(
@@ -53,49 +170,16 @@ fn main() {
     )
     .unwrap();
 
+    // Pipeline
     let main_loop = glib::MainLoop::new(None, false);
 
     let pipeline = gst::Pipeline::new(None);
 
-    // =================== pseudo input producer (temporary) =================
-    // FIXME: use srtsrc instead
-    let source = gst::parse_bin_from_description(
-        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks
-        ! audio/x-raw,rate=48000,channels=2
-        ! rtpL24pay",
-        true,
-    )
-    .expect("Error creating input branch")
-    .upcast::<gst::Element>();
-
-    let depayloader = gst::ElementFactory::make("rtpL24depay", None).unwrap();
-
-    // We always re-payload instead of passing through L24 RTP packets as-is
-    // because that makes everything easier in case we want to add an encoder
-    // with larger frame sizes later. Avoids special-casing: we can just use
-    // the same mechanism/code for all scenarios.
-    let payloader = gst::ElementFactory::make("rtpL24pay", None).unwrap();
-    payloader.set_property("min-ptime", 1_000_000i64);
-    payloader.set_property("max-ptime", 1_000_000i64);
-    payloader.set_property("auto-header-extension", false);
-
-    // Set things up to add our RTP header extension data
-    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
-        .unwrap()
-        .downcast::<gst_rtp::RTPHeaderExtension>()
-        .unwrap();
-
-    hdr_ext.set_id(1);
-
-    payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
-
-    pipeline
-        .add_many(&[&source, &depayloader, &payloader])
-        .unwrap();
-
-    gst::Element::link_many(&[&source, &depayloader, &payloader]).unwrap();
-
-    // ============== end pseudo input producer ===============================
+    let source = match input_url.scheme() {
+        "test" => create_test_input(),
+        "srt" => create_srt_input(&input_url),
+        scheme => unimplemented!("Unhandled protocol {}", scheme),
+    };
 
     let depayloader = gst::ElementFactory::make("rtpL24depay", None).unwrap();
     depayloader.set_property("auto-header-extension", false);
@@ -120,15 +204,15 @@ fn main() {
     sink.set_property("sync", false);
 
     pipeline
-        .add_many(&[&depayloader, &chunker, &conv, &enc, &sink])
+        .add_many(&[&source, &depayloader, &chunker, &conv, &enc, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&payloader, &depayloader]).unwrap(); // FIXME
+    gst::Element::link_many(&[&source, &depayloader, &chunker, &conv, &enc, &sink]).unwrap();
 
-    gst::Element::link_many(&[&depayloader, &chunker, &conv, &enc, &sink]).unwrap();
-
-    pipeline.set_start_time(gst::ClockTime::NONE);
-    pipeline.set_base_time(gst::ClockTime::ZERO);
+    if input_url.scheme() == "test" {
+        pipeline.set_start_time(gst::ClockTime::NONE);
+        pipeline.set_base_time(gst::ClockTime::ZERO);
+    }
 
     // Set up AppSink
     let appsink = sink
@@ -186,9 +270,9 @@ fn main() {
                                 // happens anyway)
                                 let avail = adapter.available();
 
-                                let (pts, distance) = adapter.prev_pts_at_offset(0);
-                                let pts = pts.unwrap();
-                                assert_eq!(distance, 0);
+                                let (pts, _distance) = adapter.prev_pts_at_offset(0);
+                                //let pts = pts.unwrap();
+                                //assert_eq!(distance, 0);
 
                                 let buf = adapter.take_buffer(avail).unwrap();
                                 let map = buf.map_readable();
