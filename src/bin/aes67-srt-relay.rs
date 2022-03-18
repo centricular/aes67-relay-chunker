@@ -20,7 +20,7 @@ use url::Url;
 
 fn create_test_input() -> gst::Element {
     let test_input = gst::parse_bin_from_description(
-        "audiotestsrc is-live=true samplesperbuffer=48 wave=ticks name=testsrc
+        "audiotestsrc is-live=false samplesperbuffer=48 wave=pink-noise name=testsrc
         ! capsfilter caps=audio/x-raw,rate=48000,channels=2",
         true,
     )
