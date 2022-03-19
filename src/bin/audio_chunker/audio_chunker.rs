@@ -18,11 +18,10 @@ use std::sync::Mutex;
 
 use gst::{gst_debug, gst_error, gst_info, gst_log, gst_trace};
 
-// TODO: make configurable
-// FIXME: need to make sure that CHUNK_SAMPLES is a multiple of the encoder
-// output frame size (which is 1024 by default in AAC, unless we add a property
-// to configure it to 960, which is also possible)
-const CHUNK_SAMPLES: u64 = 5 * 48128; // FIXME 5 * 48000u64;
+// 1024 samples is the default frame size in AAC (960 is theoretically
+// also possible, but none of our encoders support that unfortunately)
+const DEFAULT_SAMPLES_PER_FRAME: u32 = 1024;
+const DEFAULT_FRAMES_PER_CHUNK: u32 = 235;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
@@ -31,6 +30,20 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
         Some("Raw audio chunker"),
     )
 });
+
+struct Settings {
+    samples_per_frame: u32,
+    frames_per_chunk: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            samples_per_frame: DEFAULT_SAMPLES_PER_FRAME,
+            frames_per_chunk: DEFAULT_FRAMES_PER_CHUNK,
+        }
+    }
+}
 
 struct State {
     info: gst_audio::AudioInfo,
@@ -43,15 +56,19 @@ struct State {
 
     // Adapter to collect samples
     adapter: gst_base::UniqueAdapter,
+
+    // Calculated from samples_per_frame * frames_per_chunk (properties)
+    chunk_samples: u64,
 }
 
 impl State {
-    fn new(info: gst_audio::AudioInfo) -> Self {
+    fn new(info: gst_audio::AudioInfo, spf: u32, fpc: u32) -> Self {
         State {
             info,
             continuity_counter: 0,
             cur_chunk: None,
             adapter: gst_base::UniqueAdapter::new(),
+            chunk_samples: spf as u64 * fpc as u64,
         }
     }
 }
@@ -60,6 +77,7 @@ pub struct AudioChunker {
     srcpad: gst::Pad,
     sinkpad: gst::Pad,
     state: Mutex<Option<State>>,
+    settings: Mutex<Settings>,
 }
 
 #[glib::object_subclass]
@@ -104,6 +122,7 @@ impl ObjectSubclass for AudioChunker {
             sinkpad,
             srcpad,
             state: Mutex::new(None),
+            settings: Mutex::new(Settings::default()),
         }
     }
 }
@@ -114,6 +133,61 @@ impl ObjectImpl for AudioChunker {
 
         obj.add_pad(&self.sinkpad).unwrap();
         obj.add_pad(&self.srcpad).unwrap();
+    }
+
+    fn properties() -> &'static [glib::ParamSpec] {
+        static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
+            vec![
+                glib::ParamSpecUInt::new(
+                    "frames-per-chunk",
+                    "Frames per chunk",
+                    "How many audio frames should be grouped into a single chunk",
+                    1,
+                    u32::MAX,
+                    DEFAULT_FRAMES_PER_CHUNK,
+                    glib::ParamFlags::READWRITE,
+                ),
+                glib::ParamSpecUInt::new(
+                    "samples-per-frame",
+                    "Samples per Frame",
+                    "Audio samples in a codec frame",
+                    1,
+                    u32::MAX,
+                    DEFAULT_SAMPLES_PER_FRAME,
+                    glib::ParamFlags::READWRITE,
+                ),
+            ]
+        });
+
+        PROPERTIES.as_ref()
+    }
+
+    fn set_property(
+        &self,
+        _obj: &Self::Type,
+        _id: usize,
+        value: &glib::Value,
+        pspec: &glib::ParamSpec,
+    ) {
+        let mut settings = self.settings.lock().unwrap();
+        match pspec.name() {
+            "frames-per-chunk" => {
+                settings.frames_per_chunk = value.get().expect("type checked upstream");
+            }
+            "samples-per-frame" => {
+                settings.samples_per_frame = value.get().expect("type checked upstream");
+            }
+            _ => unimplemented!(),
+        };
+    }
+
+    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+        let settings = self.settings.lock().unwrap();
+        match pspec.name() {
+            "frames-per-chunk" => settings.frames_per_chunk.to_value(),
+            "samples-per-frame" => settings.samples_per_frame.to_value(),
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -192,8 +266,10 @@ impl ElementImpl for AudioChunker {
 
 impl AudioChunker {
     fn advance_chunk(&self, element: &super::AudioChunker, state: &mut State, pos: u64) {
+        let samples_per_chunk = state.chunk_samples;
+
         let (new_start, new_stop) = match state.cur_chunk {
-            Some((start, stop, _)) => (start + CHUNK_SAMPLES, stop + CHUNK_SAMPLES),
+            Some((start, stop, _)) => (start + samples_per_chunk, stop + samples_per_chunk),
             None => unreachable!(),
         };
 
@@ -227,6 +303,8 @@ impl AudioChunker {
             Some(ref mut state) => state,
         };
 
+        let samples_per_chunk = state.chunk_samples;
+
         // Determine absolute timestamp for this buffer (use pts for starters) (FIXME)
         let abs_ts = buffer.pts().unwrap();
 
@@ -250,7 +328,7 @@ impl AudioChunker {
             n_samples,
         );
 
-        if n_samples > CHUNK_SAMPLES {
+        if n_samples > samples_per_chunk {
             return Err(gst::FlowError::NotSupported);
         }
 
@@ -260,8 +338,8 @@ impl AudioChunker {
             let (chunk_start_off, chunk_end_off, chunk_pos_off) = match state.cur_chunk {
                 Some((start, stop, pos)) => (start, stop, pos),
                 None => {
-                    let start = (abs_off / CHUNK_SAMPLES) * CHUNK_SAMPLES;
-                    let stop = start + CHUNK_SAMPLES;
+                    let start = (abs_off / samples_per_chunk) * samples_per_chunk;
+                    let stop = start + samples_per_chunk;
                     state.cur_chunk = Some((start, stop, start));
                     (start, stop, start)
                 }
@@ -372,7 +450,7 @@ impl AudioChunker {
             break;
         }
 
-        let chunk_size = CHUNK_SAMPLES as usize * state.info.bpf() as usize;
+        let chunk_size = samples_per_chunk as usize * state.info.bpf() as usize;
 
         // Push out complete chunks, if any
         while state.adapter.available() >= chunk_size {
@@ -499,7 +577,21 @@ impl AudioChunker {
                     unimplemented!("Caps changes are not supported!");
                 }
 
-                *state = Some(State::new(info));
+                let (spf, fpc) = {
+                    let settings = self.settings.lock().unwrap();
+                    (settings.samples_per_frame, settings.frames_per_chunk)
+                };
+
+                *state = Some(State::new(info, spf, fpc));
+
+                gst_info!(
+                    CAT,
+                    obj: pad,
+                    "Samples per frame: {}, frames per chunk: {}, samples per chunk: {}",
+                    spf,
+                    fpc,
+                    spf * fpc
+                );
             }
             EventView::Eos(_) => {
                 unimplemented!("EOS");
@@ -532,13 +624,18 @@ impl AudioChunker {
 
                     let state_guard = self.state.lock().unwrap();
 
-                    let sample_rate = if let Some(state) = state_guard.as_ref() {
-                        state.info.rate()
+                    let (sample_rate, samples_per_chunk) = if let Some(state) = state_guard.as_ref()
+                    {
+                        (state.info.rate(), state.chunk_samples)
                     } else {
-                        48000u32
+                        let settings = self.settings.lock().unwrap();
+                        let samples_per_chunk =
+                            settings.samples_per_frame as u64 * settings.frames_per_chunk as u64;
+
+                        (48000u32, samples_per_chunk)
                     };
 
-                    let chunk_duration = CHUNK_SAMPLES
+                    let chunk_duration = samples_per_chunk
                         .mul_div_round(*gst::ClockTime::SECOND, sample_rate as u64)
                         .map(gst::ClockTime::from_nseconds)
                         .unwrap();
