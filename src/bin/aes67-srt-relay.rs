@@ -153,6 +153,12 @@ fn create_srt_output(srt_url: Url) -> gst::Element {
     sink
 }
 
+fn create_udp_output(udp_url: Url) -> gst::Element {
+    let sink = gst::Element::make_from_uri(gst::URIType::Sink, udp_url.as_str(), None).unwrap();
+    sink.set_property("sync", false);
+    sink
+}
+
 fn main() {
     // Command line arguments
     let matches = Command::new("aes67-srt-relay")
@@ -167,7 +173,7 @@ fn main() {
         .arg(
             Arg::new("output-uri")
                 .required(true)
-                .help("Output URI, e.g. srt://127.0.0.1:7001 or null://"),
+                .help("Output URI, e.g. srt://127.0.0.1:7001 or udp://127.0.0.1:8001 or null://"),
         )
         .arg(
             Arg::new("silent")
@@ -311,6 +317,7 @@ and send it to a cloud server via SRT for chunking + encoding.",
     let sink = match output_url.scheme() {
         "null" => create_null_output(),
         "srt" => create_srt_output(output_url),
+        "udp" => create_udp_output(output_url),
         scheme => unimplemented!("Unhandled output protocol {}", scheme),
     };
 

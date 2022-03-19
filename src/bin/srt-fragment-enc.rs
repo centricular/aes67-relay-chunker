@@ -71,6 +71,36 @@ fn create_srt_input(srt_url: &Url) -> gst::Element {
     bin.upcast::<gst::Element>()
 }
 
+fn create_udp_input(udp_url: &Url) -> gst::Element {
+    let bin = gst::Bin::new(Some("udp-source"));
+
+    let src = gst::Element::make_from_uri(gst::URIType::Src, udp_url.as_str(), None).unwrap();
+
+    // maybe we should use rtpgdp payloading?
+    src.set_property(
+        "caps",
+        gst::Caps::builder("application/x-rtp")
+            .field("media", "audio")
+            .field("clock-rate", 48_000i32) // FIXME: hardcoded
+            .field("channels", 2i32) // FIXME: hardcoded
+            .build(),
+    );
+
+    let src_pad = src.static_pad("src").unwrap();
+
+    bin.add_many(&[&src]).unwrap();
+
+    gst::Element::link_many(&[&src]).unwrap();
+
+    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+        .unwrap()
+        .upcast::<gst::Pad>();
+
+    bin.add_pad(&ghostpad).unwrap();
+
+    bin.upcast::<gst::Element>()
+}
+
 // Not sure what the point of this test input is
 fn create_test_input() -> gst::Element {
     let bin = gst::Bin::new(Some("test-source"));
@@ -131,7 +161,7 @@ fn main() {
         .arg(
             Arg::new("input-uri")
                 .required(true)
-                .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener"),
+                .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener or udp://0.0.0.0:8001"),
         )
         .arg(
             Arg::new("encoding")
@@ -160,7 +190,7 @@ for reproducibility",
     let input_url = url::Url::parse(input_uri)
         .or_else(|err| {
             eprintln!(
-                "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener or test://"
+                "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener or udp://0.0.0.0:8001 or test://"
             );
             return Err(err);
         })
@@ -193,6 +223,7 @@ for reproducibility",
     let source = match input_url.scheme() {
         "test" => create_test_input(),
         "srt" => create_srt_input(&input_url),
+        "udp" => create_udp_input(&input_url),
         scheme => unimplemented!("Unhandled protocol {}", scheme),
     };
 
