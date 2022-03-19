@@ -141,6 +141,13 @@ fn main() {
                 .possible_values(["aac-fdk", "aac-vo", "flac", "none"])
                 .default_value("aac-fdk"),
         )
+        .arg(
+            Arg::new("frames-per-chunk")
+                .short('f')
+                .long("frames-per-chunk")
+                .help("How many (encoded) frames of 1024 samples there should be per output audio chunk")
+                .default_value("325"),
+        )
         .after_help(
             "Receives an RTP-packetised audio stream with embedded PTP timestamps through
 SRT, encodes it and then fragments it into chunks along absolute timestamp boundaries
@@ -203,6 +210,8 @@ for reproducibility",
     depayloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
     let chunker = gst::ElementFactory::make("x-audiochunker", None).unwrap();
+    let frames_per_chunk: u32 = matches.value_of_t("frames-per-chunk").unwrap();
+    chunker.set_property("frames-per-chunk", frames_per_chunk);
 
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
