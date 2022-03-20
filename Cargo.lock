@@ -9,6 +9,7 @@ dependencies = [
  "anyhow",
  "atomic_refcell",
  "clap",
+ "crczoo",
  "glib",
  "gstreamer",
  "gstreamer-app",
@@ -92,6 +93,12 @@ dependencies = [
  "termcolor",
  "textwrap",
 ]
+
+[[package]]
+name = "crczoo"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdc3529d92be2d9da1455ad2b3bf8654fe92ced4afaac2d335a803d87fdc6d3c"
 
 [[package]]
 name = "form_urlencoded"

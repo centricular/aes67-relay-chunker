@@ -11,6 +11,7 @@ license = "MPL-2.0"
 anyhow = "1.0"
 atomic_refcell = "0.1.8"
 clap = "3.1.0"
+crczoo = "0.1.1"
 glib = { git = "https://github.com/gtk-rs/gtk-rs-core" }
 gst = { package = "gstreamer", git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs", features = ["v1_20"] }
 gst-app = { package = "gstreamer-app", git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs", features = ["v1_20"] }
