@@ -305,7 +305,9 @@ impl AudioChunker {
 
         let samples_per_chunk = state.chunk_samples;
 
-        // Determine absolute timestamp for this buffer (use pts for starters) (FIXME)
+        // Determine absolute timestamp for this buffer (RTP header extension
+        // parser will have set the pts to the absolute PTP timestamp) in our
+        // case (maybe we should instead use ReferenceTimestampMeta here too?)
         let abs_ts = buffer.pts().unwrap();
 
         // Convert to an absolute sample offset
@@ -476,7 +478,8 @@ impl AudioChunker {
 
             let outbuf_ref = outbuf.get_mut().unwrap();
 
-            if state.continuity_counter == 0 {
+            let continuity_counter = state.continuity_counter;
+            if continuity_counter == 0 {
                 outbuf_ref.set_flags(gst::BufferFlags::DISCONT);
             } else {
                 outbuf_ref.unset_flags(gst::BufferFlags::DISCONT);
@@ -512,6 +515,7 @@ impl AudioChunker {
             let s = gst::Structure::builder("chunk-start")
                 .field("offset", abs_off)
                 .field("pts", chunk_pts)
+                .field("continuity-counter", continuity_counter)
                 .build();
 
             self.srcpad.push_event(gst::event::CustomDownstream::new(s));
@@ -528,6 +532,7 @@ impl AudioChunker {
             let s = gst::Structure::builder("chunk-end")
                 .field("offset", abs_off)
                 .field("pts", chunk_pts)
+                .field("continuity-counter", continuity_counter)
                 .build();
 
             self.srcpad.push_event(gst::event::CustomDownstream::new(s));

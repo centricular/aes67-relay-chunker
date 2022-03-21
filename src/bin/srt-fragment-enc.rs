@@ -436,6 +436,9 @@ for reproducibility",
                                 adapter.clear();
                             }
                             "chunk-end" => {
+                                let continuity_counter =
+                                    s.get::<u64>("continuity-counter").unwrap();
+
                                 // Note that currently the chunk-end event is
                                 // only pushed through the audio encoder on
                                 // the next chunk, so we have one chunk delay
@@ -455,15 +458,22 @@ for reproducibility",
                                 let buf_data = map.unwrap();
                                 let digest = md5::compute(buf_data.as_slice());
 
-                                println!("{:?}: {:?}", pts, digest);
+                                let msg = if continuity_counter < 10 {
+                                    format!("continuity {}, discard", continuity_counter)
+                                } else {
+                                    "".to_string()
+                                };
+
+                                println!("{:?}: {:?} {}", pts, digest, msg);
 
                                 gst_info!(
                                     CAT,
                                     obj: appsink.upcast_ref::<gst::Element>(),
-                                    "chunk @ pts {:?}, digest {:?}, size {} bytes",
+                                    "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
                                     pts,
                                     digest,
                                     avail,
+                                    continuity_counter,
                                 );
                             }
                             _ => {}
