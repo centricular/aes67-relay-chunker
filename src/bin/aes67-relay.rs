@@ -1,4 +1,4 @@
-// aes67-srt-relay
+// aes67-relay
 //
 // Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
 //
@@ -161,10 +161,10 @@ fn create_udp_output(udp_url: Url) -> gst::Element {
 
 fn main() {
     // Command line arguments
-    let matches = Command::new("aes67-srt-relay")
+    let matches = Command::new("aes67-relay")
         .version("0.1")
         .author("Tim-Philipp Müller <tim centricular com>")
-        .about("AES67 to SRT relay")
+        .about("AES67 to SRT/UDP relay")
         .arg(
             Arg::new("input-uri")
                 .required(true)
@@ -190,7 +190,7 @@ fn main() {
         )
         .after_help(
             "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
-and send it to a cloud server via SRT for chunking + encoding.",
+and send it to a cloud server via SRT or UDP for chunking + encoding.",
         )
         .get_matches();
 
