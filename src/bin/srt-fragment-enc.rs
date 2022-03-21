@@ -365,12 +365,29 @@ for reproducibility",
 
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
+    // Disable dithering as it would mess with the sample values by adding
+    // random values and is also not really needed when feeding into an
+    // mp3/aac encoder that will do way worse things to the audio anyway.
+    conv.set_property_from_str("dithering", "none");
+
     let encoding = matches.value_of("encoding").unwrap();
 
     // TODO: add mpeg-ts muxing once AAC encoding is consistent
     let enc = match encoding {
-        "aac-fdk" => gst::ElementFactory::make("fdkaacenc", None).unwrap(),
-        "aac-vo" => gst::ElementFactory::make("voaacenc", None).unwrap(),
+        "aac-fdk" => {
+            let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+            aacenc.set_property("perfect-timestamp", false);
+            aacenc.set_property("tolerance", 0i64);
+            aacenc.set_property("hard-resync", true); // use for flacenc too?
+            aacenc
+        }
+        "aac-vo" => {
+            let aacenc = gst::ElementFactory::make("voaacenc", None).unwrap();
+            aacenc.set_property("perfect-timestamp", false);
+            aacenc.set_property("tolerance", 0i64);
+            aacenc.set_property("hard-resync", true); // use for flacenc too?
+            aacenc
+        }
         "flac" => make_flacenc(),
         "none" => gst::ElementFactory::make("identity", None).unwrap(),
         _ => unreachable!(),
