@@ -1,4 +1,4 @@
-// srt-fragment-enc
+// fragment-enc
 //
 // Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
 //
@@ -27,9 +27,9 @@ use url::Url;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
-        "srt-fragment-enc",
+        "fragment-enc",
         gst::DebugColorFlags::empty(),
-        Some("SRT fragment encoder"),
+        Some("Fragment encoder"),
     )
 });
 
@@ -273,10 +273,10 @@ fn make_flacenc() -> gst::Element {
 
 fn main() {
     // Command line arguments
-    let matches = Command::new("srt-fragment-encoder")
+    let matches = Command::new("fragment-encoder")
         .version("0.1")
         .author("Tim-Philipp Müller <tim centricular com>")
-        .about("SRT receiver and fragment encoder")
+        .about("Audio receiver and fragment encoder")
         .arg(
             Arg::new("input-uri")
                 .required(true)
@@ -299,7 +299,7 @@ fn main() {
         )
         .after_help(
             "Receives an RTP-packetised audio stream with embedded PTP timestamps through
-SRT, encodes it and then fragments it into chunks along absolute timestamp boundaries
+SRT or UDP, encodes it and then fragments it into chunks along absolute timestamp boundaries
 for reproducibility",
         )
         .get_matches();
