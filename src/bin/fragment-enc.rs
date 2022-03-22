@@ -288,14 +288,14 @@ fn main() {
                 .long("encoding")
                 .help("Encoding of assembled audio chunks")
                 .possible_values(["aac-fdk", "aac-vo", "flac", "none"])
-                .default_value("aac-fdk"),
+                .default_value("flac"),
         )
         .arg(
             Arg::new("frames-per-chunk")
                 .short('f')
                 .long("frames-per-chunk")
                 .help("How many (encoded) frames of 1024 samples there should be per output audio chunk")
-                .default_value("325"),
+                .default_value("150"),
         )
         .after_help(
             "Receives an RTP-packetised audio stream with embedded PTP timestamps through
