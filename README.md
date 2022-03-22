@@ -325,15 +325,15 @@ This should be the case even if started at different times or when restarted.
 
 Either:
 
- - Terminal 1: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp null://`
+ - Terminal 1: `./target/debug/aes67-relay sdp:///path/to/dante.sdp null://`
 
- - Terminal 2: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp null://`
+ - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp null://`
 
  - stop/restart at will
 
 or
 
- - `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp null:// & sleep 10 && ./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp null://`
+ - `./target/debug/aes67-relay sdp:///path/to/dante.sdp null:// & sleep 10 && ./target/debug/aes67-relay sdp:///path/to/dante.sdp null://`
    (but see Known Issues below)
 
 Packet loss should not affect anything:
@@ -345,9 +345,9 @@ Packet loss should not affect anything:
 
 ### UDP
 
- - Terminal 1: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp udp://127.0.0.1:8000`
+ - Terminal 1: `./target/debug/aes67-relay sdp:///path/to/dante.sdp udp://127.0.0.1:8000`
 
- - Terminal 2: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp udp://127.0.0.1:8002`
+ - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp udp://127.0.0.1:8002`
 
  - Terminal 3: `./target/debug/fragment-enc udp://0.0.0.0:8000 --frames-per-chunk=75 --encoding=none`
 
@@ -359,9 +359,9 @@ Packet loss should not affect anything:
 
 ### SRT
 
- - Terminal 1: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7001`
+ - Terminal 1: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7001`
 
- - Terminal 2: `./target/debug/aes67-srt-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7002`
+ - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7002`
 
  - Terminal 3: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=none`
 
