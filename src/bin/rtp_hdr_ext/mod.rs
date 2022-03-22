@@ -1,4 +1,4 @@
-// RTP header extension support for aes67-srt-relay + srt-fragment-encoder
+// RTP header extension support for aes67-relay + fragment-encoder
 //
 // Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
 //
