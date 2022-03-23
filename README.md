@@ -1,7 +1,7 @@
 # aes67-relay-chunker
 
 Receive an AES67 audio stream and relay it to a remote server in the cloud
-which will encode it and mux it and chunk it into fragments of multiple
+which will encode it to AAC and mux it and chunk it into fragments of multiple
 seconds, e.g. for HLS streaming purposes.
 
 The goal is to do this in such a way that multiple relay/fragment-encoder
@@ -216,6 +216,25 @@ We currently just print a timestamp and checksum of the encoded chunk and
 not write it to disk, since it's not very useful yet without any muxing,
 and it's enough to demonstrate the principle.
 
+#### FLAC encoding
+
+FLAC audio frames and frame headers contain two things that thwart our goal
+of creating reproducible output just based on the input data and timestamps:
+
+ 1. a frame number starting from 0 (means the same frames would get different
+    numbers if fragment-encoders are started at different times)
+
+ 2. various CRC checksums: one for the header and one for the entire frame
+
+In order to achieve our goal we
+
+ - rewrite the frame header with a frame number that's based on the absolute
+   PTP timestamp (frame number is only 31 bits though, so wraps every 1.45 years)
+
+ - update the frame header crc8 checksum for the updated frame number
+
+ - update the frame crc16 checksum for the updated frame header + crc8
+
 ### Todo
 
  - MPEG-TS muxing of AAC (might require MPEG-TS muxer co-operation for CCs
@@ -233,12 +252,22 @@ and it's enough to demonstrate the principle.
 
  - Support for SRT authentication
 
+ - Only discard based on continuity count for encodings that need stabilisation,
+   not raw audio or FLAC
+
+ - Discard encoded chunks without timestamp (caused by header packets with FLAC)
+
 ### Known Issues
 
  - fdk-aac encoder doesn't create reproducible output yet contrary to earlier
    testing. Would need more investigation why (perhaps some settings changed,
    or it's input dependent and we just got lucky before; might require encoder
    co-operation in the worst case).
+
+   - UPDATE: seems to work fine with `--frames-per-chunk=75` which produces
+     'cleanly-sized' chunks of 1.8s (or multiples thereof). Previous testing
+     was with `--frame-size=325` which resulted in chunks of 6.933333333s
+     (no, me neither).
 
  - sometimes voaacenc also doesn't create consistent output. When this happens,
    the buffer timestamps are off by one nanosecond from the other encoder,
@@ -247,6 +276,9 @@ and it's enough to demonstrate the principle.
    somewhere, possibly in the encoder or encoder baseclass, and then everything
    is off by one sample. Needs investigating. Might also be possible to detect
    this in the application and just have it restart itself when that happens.
+
+   - Might not happen with e.g. `--frames-per-chunk=75` which produces
+     'cleanly-sized' chunks of 1.8s (or multiples thereof)
 
  - panics when SRT is used and sender disconnects (can make it error out
    though and then just restart; or use proposed [`keep-listening`](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/967/)
