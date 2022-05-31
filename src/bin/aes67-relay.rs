@@ -49,7 +49,7 @@ fn create_test_input() -> gst::Element {
 }
 
 // We only support L24 audio for now, and assume PTP clocking is signalled (KISS)
-fn create_sdp_input(sdp_url: Url) -> gst::Element {
+fn create_sdp_input(sdp_url: &Url) -> gst::Element {
     let bin = gst::Bin::new(Some("sdp-source"));
 
     let sdpsrc = gst::ElementFactory::make("sdpsrc", None).unwrap();
@@ -101,7 +101,7 @@ fn create_sdp_input(sdp_url: Url) -> gst::Element {
 }
 
 // We only support RTSP with L24 audio for now (KISS)
-fn create_rtsp_input(rtsp_url: Url) -> gst::Element {
+fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
     let bin = gst::Bin::new(Some("rtsp-source"));
 
     // Requires:
@@ -148,14 +148,12 @@ fn create_srt_output(srt_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, srt_url.as_str(), None).unwrap();
     //let sink = gst::ElementFactory::make("srtsink", None).unwrap();
     //sink.set_property("uri", "srt://127.0.0.1:7001");
-    sink.set_property("sync", false);
     //sink.set_property("wait-for-connection", false);
     sink
 }
 
 fn create_udp_output(udp_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, udp_url.as_str(), None).unwrap();
-    sink.set_property("sync", false);
     sink
 }
 
@@ -233,8 +231,8 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     let pipeline = gst::Pipeline::new(None);
 
     let source = match input_url.scheme() {
-        "rtsp" => create_rtsp_input(input_url),
-        "sdp" => create_sdp_input(input_url),
+        "rtsp" => create_rtsp_input(&input_url),
+        "sdp" => create_sdp_input(&input_url),
         "test" => create_test_input(),
         scheme => unimplemented!("Unhandled protocol {}", scheme),
     };
@@ -320,6 +318,12 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         "udp" => create_udp_output(output_url),
         scheme => unimplemented!("Unhandled output protocol {}", scheme),
     };
+
+    // audiotestsrc operates in is-live=false mode for consistent timestamps,
+    // so we must make the sink sync to the clock in that case. In case the
+    // source is already live, like with udpsrc (sdp) or srtsrc, we set the
+    // sink to sync=false.
+    sink.set_property("sync", input_url.scheme() == "test");
 
     pipeline
         .add_many(&[&source, &id, &conv, &payloader, &sink])
