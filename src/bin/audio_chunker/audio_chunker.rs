@@ -513,6 +513,7 @@ impl AudioChunker {
             // encoder (which will output smaller frames) and muxer, and
             // collect all coded packets belonging to the same input chunk.
             let s = gst::Structure::builder("chunk-start")
+                .field("chunk-num", abs_off / samples_per_chunk)
                 .field("offset", abs_off)
                 .field("pts", chunk_pts)
                 .field("continuity-counter", continuity_counter)
@@ -530,6 +531,7 @@ impl AudioChunker {
             self.srcpad.push(outbuf)?;
 
             let s = gst::Structure::builder("chunk-end")
+                .field("chunk-num", abs_off / samples_per_chunk)
                 .field("offset", abs_off)
                 .field("pts", chunk_pts)
                 .field("continuity-counter", continuity_counter)

@@ -338,6 +338,8 @@ for reproducibility",
                                 let continuity_counter =
                                     s.get::<u64>("continuity-counter").unwrap();
 
+                                let chunk_num = s.get::<u64>("chunk-num").unwrap();
+
                                 // Note that currently the chunk-end event is
                                 // only pushed through the audio encoder on
                                 // the next chunk, so we have one chunk delay
