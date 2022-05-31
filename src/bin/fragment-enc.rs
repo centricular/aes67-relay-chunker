@@ -22,6 +22,9 @@ use once_cell::sync::Lazy;
 
 use atomic_refcell::AtomicRefCell;
 
+use std::fs::File;
+use std::io::prelude::*;
+
 use std::sync::Arc;
 
 use url::Url;
@@ -179,6 +182,14 @@ fn main() {
                 .help("How many (encoded) frames of 1024 samples there should be per output audio chunk")
                 .default_value("150"),
         )
+        .arg(
+            Arg::new("output-pattern")
+                .short('o')
+                .long("output-pattern")
+                .takes_value(true)
+                .value_name("FILENAME-PATTERN")
+                .help("File path pattern for chunks, must contain '{num}' placeholder for chunk number, e.g. '/tmp/p1-audio-aac-{num}.ts'")
+        )
         .after_help(
             "Receives an RTP-packetised audio stream with embedded PTP timestamps through
 SRT or UDP, encodes it and then fragments it into chunks along absolute timestamp boundaries
@@ -289,6 +300,14 @@ for reproducibility",
         pipeline.set_base_time(gst::ClockTime::ZERO);
     }
 
+    let output_pattern = matches.value_of("output-pattern").map(|s| s.to_string());
+    if let Some(opattern) = &output_pattern {
+        if opattern.find("{num}").is_none() {
+            eprintln!("Provided filename output pattern does not contain '{{num}}'!");
+            return;
+        }
+    }
+
     // Set up AppSink
     let appsink = sink
         .dynamic_cast::<gst_app::AppSink>()
@@ -359,8 +378,28 @@ for reproducibility",
                                 let buf_data = map.unwrap();
                                 let digest = md5::compute(buf_data.as_slice());
 
+                                // Create output filename for the chunk
+                                let chunk_fn = if let Some(fn_pattern) = &output_pattern {
+                                    // The chunk numbers will vary depending on the frames per chunk,
+                                    // so add that to the filename to avoid confusion when the config
+                                    // changes. Also, this makes it possible to calculate an absolute
+                                    // sample offset from the chunk number and frames per chunk, which
+                                    // in turn allows deducing the absolute timestamp of the chunk.
+                                    // Note: We've already checked that the pattern contains '{num}'.
+                                    let fname = fn_pattern.replace(
+                                        "{num}",
+                                        &format!("{chunk_num}@{frames_per_chunk}"),
+                                    );
+
+                                    Some(fname)
+                                } else {
+                                    None
+                                };
+
                                 let msg = if continuity_counter < 10 {
                                     format!("continuity {}, discard", continuity_counter)
+                                } else if let Some(fname) = &chunk_fn {
+                                    format!("file {fname}")
                                 } else {
                                     "".to_string()
                                 };
@@ -376,6 +415,20 @@ for reproducibility",
                                     avail,
                                     continuity_counter,
                                 );
+
+                                // Write chunk to file
+                                if let Some(filename) = &chunk_fn {
+                                    match File::create(&filename) {
+                                        Ok(mut file) => {
+                                            if let Err(err) = file.write(buf_data.as_slice()) {
+                                                eprintln!("ERROR writing file {filename}: {err}");
+                                            }
+                                        }
+                                        Err(ref err) => {
+                                            eprintln!("ERROR creating file {filename}: {err}");
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
