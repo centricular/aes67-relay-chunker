@@ -16,6 +16,7 @@ use clap::{Arg, Command};
 
 use gst::prelude::*;
 use gst::{gst_info, gst_trace};
+use gst::{Caps, ClockTime, ReferenceTimestampMeta};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
 
 use once_cell::sync::Lazy;
@@ -114,14 +115,29 @@ fn create_test_input() -> gst::Element {
     src.set_property("samplesperbuffer", 48i32);
     src.set_property_from_str("wave", "ticks");
 
-    // FIXME: add ReferenceTimestampMeta
+    // Get the audiotestsrc's source pad
+    let src_pad = src.static_pad("src").unwrap();
+
+    // Add a buffer probe to the pad so we can decorate buffers with
+    // GstReferenceTimestampMetas which the RTP Header Extension writer
+    // will look for (in the SDP/RTSP case rtpjitterbuffer adds these)
+    let ts_meta_ref = Caps::builder("timestamp/x-systemclock").build();
+    src_pad.add_probe(gst::PadProbeType::BUFFER, move |_, probe_info| {
+        if let Some(gst::PadProbeData::Buffer(ref mut buffer)) = probe_info.data {
+            let pts = buffer.pts().unwrap();
+
+            ReferenceTimestampMeta::add(buffer.make_mut(), &ts_meta_ref, pts, ClockTime::NONE);
+        }
+
+        gst::PadProbeReturn::Ok
+    });
 
     let capsfilter = gst::ElementFactory::make("capsfilter", None).unwrap();
 
     capsfilter.set_property(
         "caps",
         gst::Caps::builder("audio/x-raw")
-            .field("clock-rate", 48_000i32)
+            .field("rate", 48_000i32)
             .field("channels", 2i32)
             .build(),
     );
