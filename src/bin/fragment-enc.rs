@@ -12,6 +12,8 @@ mod audio_chunker;
 mod fragment_enc;
 mod rtp_hdr_ext;
 
+use fragment_enc::frame::EncodedFrame;
+
 use clap::{Arg, Command};
 
 use gst::prelude::*;
@@ -39,7 +41,7 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
 });
 
 struct ChunkCollector {
-    adapter: gst_base::UniqueAdapter,
+    frames: Vec<EncodedFrame>,
 }
 
 fn create_srt_input(srt_url: &Url) -> gst::Element {
@@ -187,8 +189,8 @@ fn main() {
             Arg::new("encoding")
                 .short('e')
                 .long("encoding")
-                .help("Encoding of assembled audio chunks")
-                .possible_values(["aac-fdk", "aac-vo", "flac", "none"])
+                .help("Encoding (and muxing) of assembled audio chunks")
+                .possible_values(["ts-aac-fdk", "ts-aac-vo", "aac-fdk", "aac-vo", "flac", "none"])
                 .default_value("flac"),
         )
         .arg(
@@ -281,16 +283,15 @@ for reproducibility",
 
     let encoding = matches.value_of("encoding").unwrap();
 
-    // TODO: add mpeg-ts muxing once AAC encoding is consistent
     let enc = match encoding {
-        "aac-fdk" => {
+        "aac-fdk" | "ts-aac-fdk" => {
             let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
             aacenc
         }
-        "aac-vo" => {
+        "aac-vo" | "ts-aac-vo" => {
             let aacenc = gst::ElementFactory::make("voaacenc", None).unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
@@ -301,6 +302,8 @@ for reproducibility",
         "none" => gst::ElementFactory::make("identity", None).unwrap(),
         _ => unreachable!(),
     };
+
+    let mux_mpegts = encoding.starts_with("ts-aac");
 
     let sink = gst::ElementFactory::make("appsink", None).unwrap();
     sink.set_property("sync", false);
@@ -329,9 +332,7 @@ for reproducibility",
         .dynamic_cast::<gst_app::AppSink>()
         .expect("Sink element is expected to be an appsink!");
 
-    let chunk_collector = Arc::new(AtomicRefCell::new(ChunkCollector {
-        adapter: gst_base::UniqueAdapter::new(),
-    }));
+    let chunk_collector = Arc::new(AtomicRefCell::new(ChunkCollector { frames: vec![] }));
 
     let cc_clone = chunk_collector.clone();
 
@@ -348,7 +349,12 @@ for reproducibility",
                     "{:?}",
                     buf,
                 );
-                collector.adapter.push(buf);
+
+                collector.frames.push(EncodedFrame {
+                    pts: buf.pts(),
+                    buffer: buf,
+                });
+
                 Ok(gst::FlowSuccess::Ok)
             })
             .new_event(move |appsink| {
@@ -357,23 +363,21 @@ for reproducibility",
                 let event = appsink.pull_object().unwrap();
                 let ev = event.downcast::<gst::Event>().ok().unwrap();
 
-                let adapter = &mut collector.adapter;
-
                 use gst::EventView;
 
                 match ev.view() {
                     EventView::CustomDownstream(ev_custom) => {
                         let s = ev_custom.structure().unwrap();
                         match s.name() {
-                            "chunk-start" => {
-                                // Should be empty already anyway
-                                adapter.clear();
-                            }
+                            "chunk-start" => collector.frames.clear(),
                             "chunk-end" => {
                                 let continuity_counter =
                                     s.get::<u64>("continuity-counter").unwrap();
 
                                 let chunk_num = s.get::<u64>("chunk-num").unwrap();
+
+                                let _abs_offset = s.get::<u64>("offset").unwrap();
+                                let pts = s.get::<u64>("pts").unwrap();
 
                                 // Note that currently the chunk-end event is
                                 // only pushed through the audio encoder on
@@ -383,13 +387,27 @@ for reproducibility",
                                 // packet loss, although we could probably send
                                 // a gap event or drain the encoder if that
                                 // happens anyway)
-                                let avail = adapter.available();
 
-                                let (pts, _distance) = adapter.prev_pts_at_offset(0);
-                                //let pts = pts.unwrap();
-                                //assert_eq!(distance, 0);
+                                let buf = if mux_mpegts {
+                                    let chunk = fragment_enc::mpegts::write_ts_chunk(
+                                        &collector.frames,
+                                        chunk_num,
+                                    );
 
-                                let buf = adapter.take_buffer(avail).unwrap();
+                                    gst::Buffer::from_slice(chunk)
+                                } else {
+                                    // N.B. in case of FLAC the first few frames
+                                    // are header frames without a timestamp. We
+                                    // should probably extract those and prepend
+                                    // them to each individual chunk (TODO)
+                                    let mut adapter = gst_base::UniqueAdapter::new();
+                                    for frame in &collector.frames {
+                                        adapter.push(frame.buffer.clone());
+                                        //println!("Pushed buffer {:?}", frame.buffer);
+                                    }
+                                    adapter.take_buffer(adapter.available()).unwrap()
+                                };
+
                                 let map = buf.map_readable();
                                 let buf_data = map.unwrap();
                                 let digest = md5::compute(buf_data.as_slice());
@@ -428,7 +446,7 @@ for reproducibility",
                                     "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
                                     pts,
                                     digest,
-                                    avail,
+                                    buf_data.size(),
                                     continuity_counter,
                                 );
 

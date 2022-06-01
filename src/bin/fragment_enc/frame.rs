@@ -1,4 +1,4 @@
-// fragment-enc - format support
+// fragment-enc - encoded frame support
 //
 // Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
 //
@@ -8,6 +8,9 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-pub mod flac;
-pub mod frame;
-pub mod mpegts;
+// Encoded audio frame
+#[derive(Debug)]
+pub struct EncodedFrame {
+    pub pts: Option<gst::ClockTime>,
+    pub buffer: gst::Buffer,
+}
