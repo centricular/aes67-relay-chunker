@@ -151,12 +151,15 @@ the original AES67 stream or the advertised PTP media clock.
  - `--encoding <encoding>`: encoding of the output chunks. Options:
    - `none`: raw PCM audio (no encoding)
    - `flac`: FLAC encoding
-   - `aac-vo`: AAC encoding with `voaacenc`
-   - `aac-fdk`: AAC encoding with `fdkaacenc` (see Known Issues below)
+   - `aac-fdk`: raw AAC encoding with `fdkaacenc`
+   - `aac-vo`: raw AAC encoding with `voaacenc`
+   - `ts-aac-fdk`: AAC encoding with `fdkaacenc` muxed into MPEG-TS container
+   - `ts-aac-vo`: AAC encoding with `voaacenc` muxed into MPEG-TS container
 
  - `--frames-per-chunk <frames-per-chunk>`: How many (encoded) frames
    of 1024 samples (hardcoded at the moment, AAC frame size) there
    should be per output audio chunk. At 48kHz one frame is 21.333ms.
+   `frames-per-chunk` should be a multiple of 3.
 
 
 The application prints timestamps and checksums of each chunk, as well as a
@@ -216,6 +219,52 @@ We currently just print a timestamp and checksum of the encoded chunk and
 not write it to disk, since it's not very useful yet without any muxing,
 and it's enough to demonstrate the principle.
 
+#### AAC + MPEG-TS
+
+Neither raw encoded AAC data nor ADTS framed AAC data need any post-processing
+for our use case.
+
+The MPEG-TS muxing however needs to be done in a certain way to make sure the
+written bitstream stays consistent (bit-identical) even when there are gaps
+in the data being muxed.
+
+Timestamps (PCR + PTS) will be written based on the absolute PTP timestamps
+of the audio data, which will be consistent across chunk encoders already,
+and will be correct automatically even if some data is missing, so no action
+required there.
+
+MPEG-TS header packets such as PATs and PMTs and all media payload packets
+have a 4-bit "continuity counter" in the MPEG-TS packet headers. If there's
+a discontinuity in the counter since the last packet for a stream, a decoder
+will assume there's a stream discontinuity and reset and resync which would
+cause glitches. This means that the continuity counter needs to be increasing
+consistently at all times even across chunk/fragment boundaries.
+
+Now, the problem we have in our fragment encoder/muxer implementation is that
+if there's packet loss and we're missing some audio data and we're skipping
+that chunk, we don't necessarily know how many MPEG-TS packets that chunk
+would have had (unless we can assume a perfect constant bitrate audio
+encoder, which we don't). Which means we don't know what the correct value
+of the continuity counter is for the next chunk we write.
+
+How do we get around this?
+
+For PAT and PMT we know how many PAT/PMT we're writing per fragment (only one
+at the beginning of the fragment currently). Given that information we can
+easily calculate the right continuity counter value based on the absolute
+fragment number which we can derive in turn from the absolute PTP timestamp
+and the number of samples per fragment.
+
+For the AAC media stream what we do is we simply make sure that in each fragment
+the number of MPEG-TS AAC media payload packets is a multiple of 16, so that the
+continuity counter for the media stream starts at 0 in each fragment.
+
+However, according to the MPEG-TS specification the continuity counter for
+a stream only increases for MPEG-TS packets that actually carry some media
+payload data, so we can't just write empty packets with stuffing data at the
+end of the chunk. What we can do though is we can write packets with 1 byte of
+media payload and stuffing bytes for the rest of the packet.
+
 #### FLAC encoding
 
 FLAC audio frames and frame headers contain two things that thwart our goal
@@ -236,11 +285,6 @@ In order to achieve our goal we
  - update the frame crc16 checksum for the updated frame header + crc8
 
 ### Todo
-
- - MPEG-TS muxing of AAC (might require MPEG-TS muxer co-operation for CCs
-   and placement of PMTs, PCRs etc)
-
- - Write chunks to disk (more useful once we have muxing as well)
 
  - Post error in audio chunker instead of panicking when client feeding
    SRT source disconnects (and an EOS gets sent)
