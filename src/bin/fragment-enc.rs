@@ -303,6 +303,11 @@ for reproducibility",
         _ => unreachable!(),
     };
 
+    let format_needs_stabilisation = match encoding {
+        "none" | "flac" => false,
+        _ => true,
+    };
+
     let mux_mpegts = encoding.starts_with("ts-aac");
 
     let sink = gst::ElementFactory::make("appsink", None).unwrap();
@@ -430,7 +435,10 @@ for reproducibility",
                                     None
                                 };
 
-                                let msg = if continuity_counter < 10 {
+                                let drop_chunk =
+                                    continuity_counter < 10 && format_needs_stabilisation;
+
+                                let msg = if drop_chunk {
                                     format!("continuity {}, discard", continuity_counter)
                                 } else if let Some(fname) = &chunk_fn {
                                     format!("file {fname}")
@@ -450,16 +458,20 @@ for reproducibility",
                                     continuity_counter,
                                 );
 
-                                // Write chunk to file
-                                if let Some(filename) = &chunk_fn {
-                                    match File::create(&filename) {
-                                        Ok(mut file) => {
-                                            if let Err(err) = file.write(buf_data.as_slice()) {
-                                                eprintln!("ERROR writing file {filename}: {err}");
+                                if !drop_chunk {
+                                    // Write chunk to file
+                                    if let Some(filename) = &chunk_fn {
+                                        match File::create(&filename) {
+                                            Ok(mut file) => {
+                                                if let Err(err) = file.write(buf_data.as_slice()) {
+                                                    eprintln!(
+                                                        "ERROR writing file {filename}: {err}"
+                                                    );
+                                                }
                                             }
-                                        }
-                                        Err(ref err) => {
-                                            eprintln!("ERROR creating file {filename}: {err}");
+                                            Err(ref err) => {
+                                                eprintln!("ERROR creating file {filename}: {err}");
+                                            }
                                         }
                                     }
                                 }

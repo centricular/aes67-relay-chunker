@@ -252,9 +252,6 @@ In order to achieve our goal we
 
  - Support for SRT authentication
 
- - Only discard based on continuity count for encodings that need stabilisation,
-   not raw audio or FLAC
-
  - Discard encoded chunks without timestamp (caused by header packets with FLAC)
 
 ### Known Issues
