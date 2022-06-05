@@ -266,6 +266,9 @@ In order to achieve our goal we
      was with `--frame-size=325` which resulted in chunks of 6.933333333s
      (no, me neither).
 
+   - We now make sure frames per chunk is a multiple of 3 so that chunks
+     start and end at 'even' timestamps.
+
  - sometimes voaacenc also doesn't create consistent output. When this happens,
    the buffer timestamps are off by one nanosecond from the other encoder,
    e.g. `4:59:24.799999999` vs. `4:59:24.800000000`. Working hypothesis is
@@ -276,6 +279,9 @@ In order to achieve our goal we
 
    - Might not happen with e.g. `--frames-per-chunk=75` which produces
      'cleanly-sized' chunks of 1.8s (or multiples thereof)
+
+   - We now make sure frames per chunk is a multiple of 3 so that chunks
+     start and end at 'even' timestamps.
 
  - panics when SRT is used and sender disconnects (can make it error out
    though and then just restart; or use proposed [`keep-listening`](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/967/)

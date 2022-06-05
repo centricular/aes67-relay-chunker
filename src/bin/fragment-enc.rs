@@ -274,6 +274,14 @@ for reproducibility",
     let frames_per_chunk: u32 = matches.value_of_t("frames-per-chunk").unwrap();
     chunker.set_property("frames-per-chunk", frames_per_chunk);
 
+    if frames_per_chunk % 3 != 0 {
+        eprintln!(
+            "Frames per chunk must be a multiple of 3 so that chunk boundaries \
+             are at 'even' positions (AAC frame size is 21.3333ms)!"
+        );
+        std::process::exit(1);
+    }
+
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
     // Disable dithering as it would mess with the sample values by adding
