@@ -103,8 +103,6 @@ be dropped.
 
  - Support sending FLAC through tunnel to fragment encoder (stretch goal)
 
- - Print RTP receiver statistics
-
  - Print SRT sender statistics
 
 ### Known Issues

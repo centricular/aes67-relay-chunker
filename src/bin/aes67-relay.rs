@@ -10,11 +10,15 @@
 
 mod rtp_hdr_ext;
 
+use std::sync::{Arc, Mutex};
+
 use clap::{Arg, Command};
 
 use gst::prelude::*;
 use gst::{Caps, ClockTime, ReferenceTimestampMeta};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
+
+use std::time::Duration;
 
 use url::Url;
 
@@ -67,11 +71,28 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
     sdpsrc
         .dynamic_cast_ref::<gst::Bin>()
         .unwrap()
-        .connect_deep_element_added(move |_sdpsrc, _bin, new_element| {
+        .connect_deep_element_added(move |sdpsrc, _bin, new_element| {
             if let Some(factory) = new_element.factory() {
-                if factory.name() == "rtpbin" {
-                    new_element.set_property("rfc7273-sync", true);
-                    new_element.set_property("add-reference-timestamp-meta", true);
+                match factory.name().as_str() {
+                    "rtpbin" => {
+                        new_element.set_property("rfc7273-sync", true);
+                        new_element.set_property("add-reference-timestamp-meta", true);
+                    }
+                    "rtpjitterbuffer" => {
+                        // post a message with the jitterbuffer to our app thread
+                        sdpsrc
+                            .post_message(
+                                gst::message::Application::builder(
+                                    gst::structure::Structure::builder("jitterbuffer")
+                                        .field("jitterbuffer", new_element.clone())
+                                        .build(),
+                                )
+                                .src(sdpsrc)
+                                .build(),
+                            )
+                            .expect("Element without bus. Should not happen!");
+                    }
+                    _ => {}
                 }
             }
         });
@@ -155,6 +176,42 @@ fn create_udp_output(udp_url: Url) -> gst::Element {
     sink
 }
 
+#[derive(Debug)]
+struct JitterbufferStats {
+    n_pushed: u64,
+    n_lost: u64,
+    time: gst::ClockTime, // local system clock timestamp, gst::util_get_timestamp()
+}
+
+impl JitterbufferStats {
+    fn from_structure(stats: &gst::Structure) -> Self {
+        JitterbufferStats {
+            time: gst::util_get_timestamp(),
+            n_lost: stats.get::<u64>("num-lost").unwrap(),
+            n_pushed: stats.get::<u64>("num-pushed").unwrap(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RelayCtx {
+    jb: Option<gst::Element>,
+    stats: JitterbufferStats,
+}
+
+impl Default for RelayCtx {
+    fn default() -> Self {
+        RelayCtx {
+            jb: None,
+            stats: JitterbufferStats {
+                n_pushed: 0,
+                n_lost: 0,
+                time: gst::util_get_timestamp(),
+            },
+        }
+    }
+}
+
 fn main() {
     // Command line arguments
     let matches = Command::new("aes67-relay")
@@ -175,7 +232,7 @@ fn main() {
             Arg::new("silent")
                 .short('s')
                 .long("silent")
-                .help("Don't print out buffer checksums every second"),
+                .help("Don't print out buffer checksums or stats every second"),
         )
         .arg(
             Arg::new("drop-probability")
@@ -247,6 +304,11 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     // For good measure, shouldn't be needed
     let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
 
+    // Jitterbuffer, will be set from message handler via application message
+    let ctx = Arc::new(Mutex::new(RelayCtx::default()));
+
+    let ctx_padprobe = ctx.clone();
+
     // Add a buffer probe to drop all buffers without GstReferenceTimestampMeta,
     // ie. before we have achieved PTP clock sync.
     let src_pad = conv.static_pad("src").unwrap();
@@ -273,9 +335,44 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                         let buf_data = map.unwrap();
                         let digest = md5::compute(buf_data.as_slice());
 
+                        let mut ctx = ctx_padprobe.lock().unwrap();
+                        let msg = match &ctx.jb {
+                            None => None,
+                            Some(jb) => {
+                                let jb_stats = jb.property::<gst::Structure>("stats");
+                                let cur_stats = JitterbufferStats::from_structure(&jb_stats);
+
+                                let n_lost = cur_stats.n_lost - ctx.stats.n_lost;
+
+                                // We know our heartbeats are full seconds apart, so will just
+                                // approximate based on the local system clock and not the
+                                // actual buffer ptp times which we don't save currently.
+                                let secs_since_last_heartbeat = (cur_stats.time.mseconds() - ctx.stats.time.mseconds() + 500) / 1000;
+
+                                ctx.stats = cur_stats;
+
+                                if n_lost > 0 {
+                                    let packets_per_second = sample_rate / samples_per_buffer;
+                                    let expected_packets = packets_per_second * secs_since_last_heartbeat;
+                                    let perc_lost = n_lost as f64 / expected_packets as f64 * 100.0;
+
+                                    if secs_since_last_heartbeat == 1 {
+                                        Some(format!("{n_lost} packet(s) lost, ~{perc_lost:.1}%"))
+                                    } else {
+                                        Some(format!("{n_lost} packet(s) lost over {secs_since_last_heartbeat} secs, ~{perc_lost:.1}%"))
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
+                        };
+
                         println!(
-                            "Buffer @ {:#?} offset {:?} hash {:?}",
-                            abs_ts, abs_off, digest
+                            "Buffer @ {:#?} offset {:?} hash {:?} {}",
+                            abs_ts,
+                            abs_off,
+                            digest,
+                            msg.unwrap_or_default()
                         );
                     }
                 }
@@ -339,6 +436,8 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     let main_loop_clone = main_loop.clone();
 
+    let ctx_buswatch = ctx.clone();
+
     bus.add_watch(move |_, msg| {
         use gst::MessageView;
 
@@ -346,6 +445,18 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
         match msg.view() {
             MessageView::Eos(..) => main_loop.quit(),
+            MessageView::Application(app_msg) => {
+                let s = app_msg.structure().unwrap();
+                match s.name() {
+                    "jitterbuffer" => {
+                        let jb = s.get::<gst::Element>("jitterbuffer").unwrap();
+
+                        let mut ctx = ctx_buswatch.lock().unwrap();
+                        ctx.jb.replace(jb);
+                    }
+                    _ => {}
+                }
+            }
             MessageView::Error(err) => {
                 println!(
                     "Error from {:?}: {} ({:?})",
@@ -361,6 +472,42 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         glib::Continue(true)
     })
     .expect("Failed to add bus watch");
+
+    // timeout
+    let ctx_timeout = ctx.clone();
+
+    glib::source::timeout_add(Duration::from_millis(1000), move || {
+        let ctx = ctx_timeout.lock().unwrap();
+
+        if silent || ctx.jb.is_none() {
+            return glib::Continue(true);
+        }
+
+        let now = gst::util_get_timestamp();
+
+        if now.mseconds() - ctx.stats.time.mseconds() > 1000 {
+            let jb = ctx.jb.as_ref().unwrap();
+            let jb_stats = jb.property::<gst::Structure>("stats");
+
+            let cur_stats = JitterbufferStats::from_structure(&jb_stats);
+
+            let n_pushed = cur_stats.n_pushed - ctx.stats.n_pushed;
+            let secs_since_last_heartbeat =
+                (cur_stats.time.mseconds() - ctx.stats.time.mseconds()) as f64 / 1000.0;
+
+            let packets_per_second = 1000.0f64;
+            let expected_packets = packets_per_second * secs_since_last_heartbeat;
+            let perc_lost = (expected_packets - n_pushed as f64) / expected_packets * 100.0;
+
+            eprintln!(
+                "Warning: {secs_since_last_heartbeat:4.1} seconds since last heartbeat! \
+                 {n_pushed:4} packet(s) received since, \
+                 ~{perc_lost:.1}% missing"
+            );
+        }
+
+        glib::Continue(true)
+    });
 
     main_loop.run();
 
