@@ -8,6 +8,8 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+mod tests;
+
 use crate::EncodedFrame;
 
 use gst::prelude::*;
@@ -325,7 +327,7 @@ fn write_pes(
 
     //println!("ADTS: {:02x?}", adts);
 
-    let n_packets = (payload_bytes + PES_HEADER_LEN + 183) / 184;
+    let n_packets = (PES_HEADER_LEN + payload_bytes + 183) / 184;
 
     let n_extra_packets =
         if let PesCounterPadding::PesWithCounterPadding(n_written) = counter_padding {
@@ -464,16 +466,21 @@ fn write_pes(
 
         *continuity_counter = (*continuity_counter + 1) % 16;
 
-        let stuffing_len = 184 - 2 - packet_payload_len;
+        if packet_payload_len == 183 {
+            // adaptation_field_length 0 = single stuffing byte (for 183 byte payload)
+            pes.push(0);
+        } else {
+            let stuffing_len = 184 - 2 - packet_payload_len;
 
-        // adaptation_field_length [excl. length byte itself]
-        pes.push(1 + stuffing_len as u8);
+            // adaptation_field_length [excl. length byte itself]
+            pes.push(1 + stuffing_len as u8);
 
-        // adaptation field flags
-        pes.push(0x00);
+            // adaptation field flags
+            pes.push(0x00);
 
-        // stuffing bytes
-        pes.extend_from_slice(&vec![0xff; stuffing_len]);
+            // stuffing bytes
+            pes.extend_from_slice(&vec![0xff; stuffing_len]);
+        }
 
         // packet payload
         pes.extend(packet_payload);
