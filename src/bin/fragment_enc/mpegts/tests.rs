@@ -56,3 +56,100 @@ fn write_pes_183bytes_in_last_packet() {
         super::PesNoCounterPadding,
     );
 }
+
+#[cfg(test)]
+#[test]
+fn write_pes_no_stuffing_needed() {
+    gst::init().unwrap();
+
+    // already written packets (content doesn't matter)
+    let mut chunk = vec![0xffu8; 59032];
+    let aac_config = super::AacConfig {
+        mpeg_version: 4,
+        channels: 2,
+        rate: 48000,
+        aot: 2,
+    };
+
+    use super::EncodedFrame;
+
+    let frames = vec![
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33386666666)),
+            buffer: gst::Buffer::from_slice(&[0x00u8; 790]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33408000000)),
+            buffer: gst::Buffer::from_slice(&[0x11u8; 853]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33429333333)),
+            buffer: gst::Buffer::from_slice(&[0x22u8; 857]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33450666666)),
+            buffer: gst::Buffer::from_slice(&[0x33u8; 888]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33472000000)),
+            buffer: gst::Buffer::from_slice(&[0x44u8; 971]),
+        },
+    ];
+    let mut cc: u8 = 8;
+    super::write_pes(
+        &mut chunk,
+        &aac_config,
+        &frames,
+        &mut cc,
+        super::PesNoCounterPadding,
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn write_pes_184byte_payload_for_last_packet() {
+    gst::init().unwrap();
+
+    // already written packets (content doesn't matter)
+    let mut chunk = vec![0xffu8; 63544];
+    let aac_config = super::AacConfig {
+        mpeg_version: 4,
+        channels: 2,
+        rate: 48000,
+        aot: 2,
+    };
+
+    use super::EncodedFrame;
+
+    let frames = vec![
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33386666666)),
+            buffer: gst::Buffer::from_slice(&[0x00u8; 856]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33408000000)),
+            buffer: gst::Buffer::from_slice(&[0x11u8; 880]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33429333333)),
+            buffer: gst::Buffer::from_slice(&[0x22u8; 861]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33450666666)),
+            buffer: gst::Buffer::from_slice(&[0x33u8; 835]),
+        },
+        EncodedFrame {
+            pts: Some(gst::ClockTime::from_nseconds(33472000000)),
+            buffer: gst::Buffer::from_slice(&[0x44u8; 934]),
+        },
+    ];
+
+    let mut cc: u8 = 0;
+    super::write_pes(
+        &mut chunk,
+        &aac_config,
+        &frames,
+        &mut cc,
+        super::PesWithCounterPadding(336),
+    );
+}

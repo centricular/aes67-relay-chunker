@@ -289,6 +289,7 @@ fn make_adts_header(aac_config: &AacConfig, frame_size: usize) -> Vec<u8> {
     hdr
 }
 
+#[derive(Debug)]
 enum PesCounterPadding {
     PesWithCounterPadding(usize),
     PesNoCounterPadding,
@@ -314,6 +315,18 @@ fn write_pes(
 
     let mut adts = Vec::<u8>::with_capacity(payload_bytes);
 
+    /*
+    // Dump frame sizes so we can easily make unit tests from the output
+    println!(
+        "write_pes: buf_len={}, cc={}, n_frames={} {:?}, cpadding: {:?}",
+        buf.len(),
+        *continuity_counter,
+        frames.len(),
+        frames.iter().map(|f| f.buffer.size()).collect::<Vec<usize>>(),
+        &counter_padding
+    );
+    */
+
     for frame in frames {
         let map = frame.buffer.map_readable();
         let frame_data = map.unwrap();
@@ -324,6 +337,8 @@ fn write_pes(
 
         adts.extend(frame_data.as_slice());
     }
+
+    assert_eq!(payload_bytes, adts.len());
 
     //println!("ADTS: {:02x?}", adts);
 
@@ -421,7 +436,7 @@ fn write_pes(
     let mut payload = &adts[162..];
 
     // PES payload packets without any stuffing
-    while payload.len() >= (184 + n_extra_packets) {
+    while payload.len() >= (184 + n_extra_packets + 1) {
         let (packet_payload, remaining_payload) = payload.split_at(184);
         payload = remaining_payload;
 
@@ -441,16 +456,21 @@ fn write_pes(
         assert_eq!(pes.len() % 188, 0);
     }
 
-    // Last few PES payload packets with stuffing, so we can pad out out the
-    // number of packets to a multiple of 16 and thus make the next one start
-    // with a continuity_counter=0
+    // Last few PES payload packets with stuffing. Stuffing might be required
+    // for multiple reasons: perhaps the last piece of the payload doesn't fill
+    // an entire MPEG-TS packet; or we need to pad out out the number of packets
+    // in a chunk to a multiple of 16 to make the next chunk start with
+    // continuity_counter=0; we might even end up here if no padding is needed
+    // at all (ie. remaining payload is 184 bytes) because we make extra sure
+    // in the previous loop that we have enough bytes left to distribute over
+    // the number of packets we have to write out (the +1 in n_extra_packets+1).
     while payload.len() > 0 {
         let packets_written = pes.len() / 188;
         let packets_left_to_write = n_total_packets - packets_written;
 
         let packet_payload_len = payload.len() / packets_left_to_write;
         assert!(packet_payload_len > 0);
-        assert!(packet_payload_len < 184);
+        assert!(packet_payload_len <= 184);
 
         let (packet_payload, remaining_payload) = payload.split_at(packet_payload_len);
         payload = remaining_payload;
@@ -461,26 +481,36 @@ fn write_pes(
         // 0x00 41 - transport_error_indicator=0, payload_unit_start_indicator=0, transport_priority=0, PID=0x0041/65
         pes.extend((0b000_0000000000000u16 | 0x0041u16).to_be_bytes());
 
-        // scrambling='00', adaptation_field_control='11' [adaptation_field + payload], continuity_counter=0
-        pes.push(0b00_11_0000 | *continuity_counter);
+        match packet_payload_len {
+            184 => {
+                // scrambling='00', adaptation_field_control='01' [payload only], continuity_counter=0
+                pes.push(0b00_01_0000 | *continuity_counter);
+            }
+            183 => {
+                // scrambling='00', adaptation_field_control='11' [adaptation_field + payload], continuity_counter=0
+                pes.push(0b00_11_0000 | *continuity_counter);
+
+                // adaptation_field_length 0 = single stuffing byte (for 183 byte payload)
+                pes.push(0);
+            }
+            _ => {
+                // scrambling='00', adaptation_field_control='11' [adaptation_field + payload], continuity_counter=0
+                pes.push(0b00_11_0000 | *continuity_counter);
+
+                let stuffing_len = 184 - 2 - packet_payload_len;
+
+                // adaptation_field_length [excl. length byte itself]
+                pes.push(1 + stuffing_len as u8);
+
+                // adaptation field flags
+                pes.push(0x00);
+
+                // stuffing bytes
+                pes.extend_from_slice(&vec![0xff; stuffing_len]);
+            }
+        }
 
         *continuity_counter = (*continuity_counter + 1) % 16;
-
-        if packet_payload_len == 183 {
-            // adaptation_field_length 0 = single stuffing byte (for 183 byte payload)
-            pes.push(0);
-        } else {
-            let stuffing_len = 184 - 2 - packet_payload_len;
-
-            // adaptation_field_length [excl. length byte itself]
-            pes.push(1 + stuffing_len as u8);
-
-            // adaptation field flags
-            pes.push(0x00);
-
-            // stuffing bytes
-            pes.extend_from_slice(&vec![0xff; stuffing_len]);
-        }
 
         // packet payload
         pes.extend(packet_payload);
