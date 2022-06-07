@@ -311,9 +311,12 @@ for reproducibility",
         _ => unreachable!(),
     };
 
-    let format_needs_stabilisation = match encoding {
-        "none" | "flac" => false,
-        _ => true,
+    // How many frames does the encoder need to "stabilise" the bitstream?
+    let encoder_stabilisation_frames = match encoding {
+        "none" | "flac" => 0,
+        "aac-fdk" | "ts-aac-fdk" => 30,
+        "aac-vo" | "ts-aac-vo" => 20,
+        _ => unreachable!(),
     };
 
     let mux_mpegts = encoding.starts_with("ts-aac");
@@ -443,8 +446,11 @@ for reproducibility",
                                     None
                                 };
 
+                                let continuous_encoded_frames =
+                                    continuity_counter * frames_per_chunk as u64;
+
                                 let drop_chunk =
-                                    continuity_counter < 10 && format_needs_stabilisation;
+                                    continuous_encoded_frames < encoder_stabilisation_frames;
 
                                 let msg = if drop_chunk {
                                     format!("continuity {}, discard", continuity_counter)
