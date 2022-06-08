@@ -159,14 +159,16 @@ the original AES67 stream or the advertised PTP media clock.
  - `--frames-per-chunk <frames-per-chunk>`: How many (encoded) frames
    of 1024 samples (hardcoded at the moment, AAC frame size) there
    should be per output audio chunk. At 48kHz one frame is 21.333ms.
-   `frames-per-chunk` should be a multiple of 3.
+   `frames-per-chunk` should be a multiple of 3. The default value is
+   150 which results in fragments of 3.2 seconds.
 
+ - `--output-pattern <FILENAME-PATTERN>`: File path pattern for chunks.
+   Must contain a `{num}` placeholder for the chunk number,
+   e.g. `/tmp/stream1-audio-aac-{num}.ts`
 
 The application prints timestamps and checksums of each chunk, as well as a
 "continuity counter", that is distance from the last discont, for the first
 N frames after a discontinuity (start or packet loss).
-
-Currently no data is written to disk yet (but that should be easy enough to add).
 
 ### Implementation Details
 
@@ -215,9 +217,10 @@ The application collects the output from the encoders into an aggregator
 (basically just a buffer store), and goes to process the collected encoded
 data whenever it sees the custom events signalling a chunk boundary.
 
-We currently just print a timestamp and checksum of the encoded chunk and
-not write it to disk, since it's not very useful yet without any muxing,
-and it's enough to demonstrate the principle.
+We currently just print a timestamp and checksum of the encoded/muxed chunk,
+which is enough to demonstrate the principle, but can also write chunks to
+disk of course by passing the `--output-pattern` command line option to the
+fragment encoder.
 
 #### AAC + MPEG-TS
 
