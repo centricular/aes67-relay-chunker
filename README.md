@@ -428,13 +428,14 @@ Packet loss should not affect anything:
 
  - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp udp://127.0.0.1:8002`
 
- - Terminal 3: `./target/debug/fragment-enc udp://0.0.0.0:8000 --frames-per-chunk=75 --encoding=none`
+ - Terminal 3: `./target/debug/fragment-enc udp://0.0.0.0:8000 --frames-per-chunk=75 --encoding=ts-aac-fdk`
 
- - Terminal 4: `./target/debug/fragment-enc udp://0.0.0.0:8002 --frames-per-chunk=75 --encoding=none`
+ - Terminal 4: `./target/debug/fragment-enc udp://0.0.0.0:8002 --frames-per-chunk=75 --encoding=ts-aac-fdk`
 
  - then stop/restart senders or receivers at will
 
- - also try with `--encoding=flac` and `--encoding=aac-vo`
+ - also try with `--encoding=none`, `--encoding=flac`, `--encoding=aac-fdk`,
+   `--encoding=aac-vo` or `--encoding=ts-aac-vo`
 
 ### SRT
 
@@ -442,13 +443,14 @@ Packet loss should not affect anything:
 
  - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7002`
 
- - Terminal 3: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=none`
+ - Terminal 3: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=ts-aac-fdk`
 
- - Terminal 4: `./target/debug/fragment-enc srt://0.0.0.0:7002?mode=listener --frames-per-chunk=75 --encoding=none`
+ - Terminal 4: `./target/debug/fragment-enc srt://0.0.0.0:7002?mode=listener --frames-per-chunk=75 --encoding=ts-aac-fdk`
 
  - then stop/restart senders or receivers at will
 
- - also try with `--encoding=flac` and `--encoding=aac-vo`
+ - also try with `--encoding=none`, `--encoding=flac`, `--encoding=aac-fdk`,
+   `--encoding=aac-vo` or `--encoding=ts-aac-vo`
 
 ### Consistent encoding if packet loss occurs
 
