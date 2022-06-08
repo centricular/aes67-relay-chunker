@@ -314,8 +314,8 @@ for reproducibility",
     // How many frames does the encoder need to "stabilise" the bitstream?
     let encoder_stabilisation_frames = match encoding {
         "none" | "flac" => 0,
-        "aac-fdk" | "ts-aac-fdk" => 30,
-        "aac-vo" | "ts-aac-vo" => 20,
+        "aac-fdk" | "ts-aac-fdk" => 100,
+        "aac-vo" | "ts-aac-vo" => 60,
         _ => unreachable!(),
     };
 
