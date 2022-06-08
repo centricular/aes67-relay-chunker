@@ -444,7 +444,7 @@ Packet loss should not affect anything:
 
  - Terminal 3: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=none`
 
- - Terminal 4: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=none`
+ - Terminal 4: `./target/debug/fragment-enc srt://0.0.0.0:7002?mode=listener --frames-per-chunk=75 --encoding=none`
 
  - then stop/restart senders or receivers at will
 
