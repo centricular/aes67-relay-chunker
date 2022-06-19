@@ -600,12 +600,11 @@ impl AudioChunker {
                     spf * fpc
                 );
             }
-            EventView::Eos(_) => {
-                unimplemented!("EOS");
-            }
             EventView::FlushStop(_) => {
                 unimplemented!("Flushing");
             }
+            // just forward the event
+            EventView::Eos(_) => (),
             _ => (),
         }
 

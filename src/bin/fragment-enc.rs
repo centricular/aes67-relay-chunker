@@ -505,9 +505,6 @@ for reproducibility",
 
     let bus = pipeline.bus().unwrap();
 
-    // Any errors will be picked up via the bus handler
-    if let Err(_) = pipeline.set_state(gst::State::Playing) {};
-
     let main_loop_clone = main_loop.clone();
 
     bus.add_watch(move |_, msg| {
@@ -516,7 +513,10 @@ for reproducibility",
         let main_loop = &main_loop_clone;
 
         match msg.view() {
-            MessageView::Eos(..) => main_loop.quit(),
+            MessageView::Eos(..) => {
+                println!("EOS. Probably means srt sender went away.");
+                main_loop.quit();
+            }
             MessageView::Error(err) => {
                 println!(
                     "Error from {:?}: {} ({:?})",
@@ -533,11 +533,20 @@ for reproducibility",
     })
     .expect("Failed to add bus watch");
 
-    main_loop.run();
+    loop {
+        // Any errors will be picked up via the bus handler
+        if let Err(_) = pipeline.set_state(gst::State::Playing) {};
 
-    pipeline
-        .set_state(gst::State::Null)
-        .expect("Failed to shut down the pipeline");
+        main_loop.run();
 
-    bus.remove_watch().unwrap();
+        println!("Shutting down pipeline.");
+
+        pipeline
+            .set_state(gst::State::Null)
+            .expect("Failed to shut down the pipeline");
+
+        println!("Restarting pipeline...");
+    }
+
+    // bus.remove_watch().unwrap();
 }
