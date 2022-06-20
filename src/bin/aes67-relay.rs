@@ -171,7 +171,7 @@ fn main() {
         .arg(
             Arg::new("output-uri")
                 .required(true)
-                .help("Output URI, e.g. srt://127.0.0.1:7001 or udp://127.0.0.1:8001 or null://"),
+                .help("Output URI, e.g. srt://127.0.0.1:7001?passphrase=longpassword or udp://127.0.0.1:8001 or null://"),
         )
         .arg(
             Arg::new("silent")
@@ -209,7 +209,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     let output_url = url::Url::parse(output_uri)
         .or_else(|err| {
-            eprintln!("Please provide a valid output URI, e.g. srt://127.0.0.1:7001 or null://");
+            eprintln!("Please provide a valid output URI, e.g. srt://127.0.0.1:7001?passphrase=longpassword or null://");
             return Err(err);
         })
         .unwrap();

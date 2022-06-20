@@ -103,8 +103,6 @@ be dropped.
 
  - Support sending FLAC through tunnel to fragment encoder (stretch goal)
 
- - Support for SRT authentication
-
  - Print RTP receiver statistics
 
  - Print SRT sender statistics
@@ -140,7 +138,7 @@ the original AES67 stream or the advertised PTP media clock.
 **Inputs:**
 
  - UDP, e.g. `udp://0.0.0.0:8001`
- - SRT, e.g. `srt://0.0.0.0:7001?mode=listener`
+ - SRT, e.g. `srt://0.0.0.0:7001?mode=listener&passphrase=longpassword`
 
 **Outputs:**
 
@@ -442,18 +440,22 @@ Packet loss should not affect anything:
 
 ### SRT
 
- - Terminal 1: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7001`
+ - Terminal 1: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7001?passphrase=longpassword`
 
- - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7002`
+ - Terminal 2: `./target/debug/aes67-relay sdp:///path/to/dante.sdp srt://127.0.0.1:7002?passphrase=longpassword`
 
- - Terminal 3: `./target/debug/fragment-enc srt://0.0.0.0:7001?mode=listener --frames-per-chunk=75 --encoding=ts-aac-fdk`
+ - Terminal 3: `./target/debug/fragment-enc 'srt://0.0.0.0:7001?mode=listener&passphrase=longpassword' --frames-per-chunk=75 --encoding=ts-aac-fdk` (*)
 
- - Terminal 4: `./target/debug/fragment-enc srt://0.0.0.0:7002?mode=listener --frames-per-chunk=75 --encoding=ts-aac-fdk`
+ - Terminal 4: `./target/debug/fragment-enc 'srt://0.0.0.0:7002?mode=listener&passphrase=longpassword' --frames-per-chunk=75 --encoding=ts-aac-fdk` (*)
 
  - then stop/restart senders or receivers at will
 
  - also try with `--encoding=none`, `--encoding=flac`, `--encoding=aac-fdk`,
    `--encoding=aac-vo` or `--encoding=ts-aac-vo`
+
+ - **(\*) Note** that on Linux you will need to put the srt:// URI argument in single
+   quotes or double quotes if it contains an `&` otherwise the shell will
+   interpret the ampersand.
 
 ### Consistent encoding if packet loss occurs
 

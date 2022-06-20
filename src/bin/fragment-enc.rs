@@ -183,7 +183,7 @@ fn main() {
         .arg(
             Arg::new("input-uri")
                 .required(true)
-                .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener or udp://0.0.0.0:8001"),
+                .help("Input URI, e.g. srt://0.0.0.0:7001?mode=listener&passphrase=longpassword or udp://0.0.0.0:8001"),
         )
         .arg(
             Arg::new("encoding")
@@ -220,7 +220,7 @@ for reproducibility",
     let input_url = url::Url::parse(input_uri)
         .or_else(|err| {
             eprintln!(
-                "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener or udp://0.0.0.0:8001 or test://"
+                "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener&passphrase=longpassword or udp://0.0.0.0:8001 or test://"
             );
             return Err(err);
         })
