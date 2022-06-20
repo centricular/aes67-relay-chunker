@@ -146,9 +146,7 @@ fn create_null_output() -> gst::Element {
 
 fn create_srt_output(srt_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, srt_url.as_str(), None).unwrap();
-    //let sink = gst::ElementFactory::make("srtsink", None).unwrap();
-    //sink.set_property("uri", "srt://127.0.0.1:7001");
-    //sink.set_property("wait-for-connection", false);
+    sink.set_property("wait-for-connection", false);
     sink
 }
 
