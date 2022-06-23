@@ -483,6 +483,9 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                 );
                 main_loop.quit();
             }
+            MessageView::Element(..) => {
+                println!("Element message: {}", msg.structure().unwrap());
+            }
             _ => (),
         };
 
