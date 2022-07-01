@@ -168,6 +168,17 @@ fn create_null_output() -> gst::Element {
     sink
 }
 
+// wait-for-connection=false means we will consume buffers and drop them
+// if there's no connection established instead of waiting for a connection
+// and causing backpressure into the pipeline.
+//
+// wait-for-connection=true means we will cause buffers to pile up in the
+// output queue until there is a connection, but since the output queue is
+// leaky that might actually be desirable because it means if the SRT connection
+// gets dropped for some reason and reconnects quickly no data will be lost.
+// Unclear if it really matters in practice though, because SRT is datagram
+// based and we wouldn't expect a connection drop in the first place if the
+// problem is only transient.
 fn create_srt_output(srt_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, srt_url.as_str(), None).unwrap();
     sink.set_property("wait-for-connection", false);
@@ -427,6 +438,14 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
+    const OUTPUT_BACKLOG_LIMIT: u64 = gst::ClockTime::from_seconds(10).nseconds();
+
+    let sink_queue = gst::ElementFactory::make("queue", Some("output-queue")).unwrap();
+    sink_queue.set_property("max-size-buffers", 0u32);
+    sink_queue.set_property("max-size-bytes", 0u32);
+    sink_queue.set_property("max-size-time", OUTPUT_BACKLOG_LIMIT);
+    sink_queue.set_property_from_str("leaky", "downstream");
+
     let sink = match output_url.scheme() {
         "null" => create_null_output(),
         "srt" => create_srt_output(output_url),
@@ -441,10 +460,10 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     sink.set_property("sync", input_url.scheme() == "test");
 
     pipeline
-        .add_many(&[&source, &id, &conv, &payloader, &sink])
+        .add_many(&[&source, &id, &conv, &payloader, &sink_queue, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&source, &id, &conv, &payloader, &sink]).unwrap();
+    gst::Element::link_many(&[&source, &id, &conv, &payloader, &sink_queue, &sink]).unwrap();
 
     pipeline.set_start_time(gst::ClockTime::NONE);
     pipeline.set_base_time(gst::ClockTime::ZERO);
@@ -551,6 +570,20 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     "startup"
                 }
             );
+        }
+
+        // Check sink queue
+        let cur_level_time = sink_queue.property::<u64>("current-level-time");
+
+        if cur_level_time > gst::ClockTime::from_seconds(2).nseconds() {
+            let backlog = cur_level_time as f64 / 1_000_000_000.0;
+            let backlog_limit = OUTPUT_BACKLOG_LIMIT as f64 / 1_000_000_000.0;
+            let dropping_msg = if backlog / backlog_limit > 0.99 {
+                "- dropping packets!"
+            } else {
+                ""
+            };
+            eprintln!("Warning: output not sending data fast enough! Backlog: {backlog:.1}s {dropping_msg}");
         }
 
         glib::Continue(true)

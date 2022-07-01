@@ -103,8 +103,6 @@ be dropped.
 
  - Support sending FLAC through tunnel to fragment encoder (stretch goal)
 
- - Print SRT sender statistics
-
 ### Known Issues
 
  - (Solved) Sometimes the packet flow seemed to stop for 0.5-2 minutes and then
