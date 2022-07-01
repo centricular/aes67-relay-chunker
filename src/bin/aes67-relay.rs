@@ -164,8 +164,7 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
 }
 
 fn create_null_output() -> gst::Element {
-    let sink = gst::ElementFactory::make("fakesink", None).unwrap();
-    sink
+    gst::ElementFactory::make("fakesink", None).unwrap()
 }
 
 // wait-for-connection=false means we will consume buffers and drop them
@@ -275,20 +274,20 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     let input_uri = matches.value_of("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
-        .or_else(|err| {
+        .map_err(|err| {
             eprintln!(
                 "Please provide a valid input URI, e.g. sdp:///path/to/foo.sdp or rtsp://127.0.0.1:8554/audio or test://"
             );
-            return Err(err);
+            err
         })
         .unwrap();
 
     let output_uri = matches.value_of("output-uri").unwrap();
 
     let output_url = url::Url::parse(output_uri)
-        .or_else(|err| {
+        .map_err(|err| {
             eprintln!("Please provide a valid output URI, e.g. srt://127.0.0.1:7001?passphrase=longpassword or null://");
-            return Err(err);
+            err
         })
         .unwrap();
 
@@ -471,7 +470,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     let bus = pipeline.bus().unwrap();
 
     // Any errors will be picked up via the bus handler
-    if let Err(_) = pipeline.set_state(gst::State::Playing) {};
+    let _ = pipeline.set_state(gst::State::Playing);
 
     let main_loop_clone = main_loop.clone();
 
@@ -488,14 +487,11 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
             MessageView::Eos(..) => main_loop.quit(),
             MessageView::Application(app_msg) => {
                 let s = app_msg.structure().unwrap();
-                match s.name() {
-                    "jitterbuffer" => {
-                        let jb = s.get::<gst::Element>("jitterbuffer").unwrap();
+                if s.name() == "jitterbuffer" {
+                    let jb = s.get::<gst::Element>("jitterbuffer").unwrap();
 
-                        let mut ctx = ctx_buswatch.lock().unwrap();
-                        ctx.jb.replace(jb);
-                    }
-                    _ => {}
+                    let mut ctx = ctx_buswatch.lock().unwrap();
+                    ctx.jb.replace(jb);
                 }
             }
             MessageView::AsyncDone(..) => {
@@ -530,10 +526,8 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     .expect("Failed to add bus watch");
 
     // timeout
-    let ctx_timeout = ctx.clone();
-
     glib::source::timeout_add(Duration::from_millis(1000), move || {
-        let ctx = ctx_timeout.lock().unwrap();
+        let ctx = ctx.lock().unwrap();
 
         if silent || ctx.jb.is_none() {
             return glib::Continue(true);
