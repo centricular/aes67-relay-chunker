@@ -455,6 +455,8 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     let ctx_buswatch = ctx.clone();
 
+    let pipeline_buswatch = pipeline.clone();
+
     bus.add_watch(move |_, msg| {
         use gst::MessageView;
 
@@ -474,12 +476,24 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     _ => {}
                 }
             }
+            MessageView::AsyncDone(..) => {
+                gst::debug_bin_to_dot_file_with_ts(
+                    &pipeline_buswatch,
+                    gst::DebugGraphDetails::all(),
+                    &"aes67-relay.async-done",
+                );
+            }
             MessageView::Error(err) => {
                 println!(
                     "Error from {:?}: {} ({:?})",
                     err.src().map(|s| s.path_string()),
                     err.error(),
                     err.debug()
+                );
+                gst::debug_bin_to_dot_file_with_ts(
+                    &pipeline_buswatch,
+                    gst::DebugGraphDetails::all(),
+                    &"aes67-relay.error",
                 );
                 main_loop.quit();
             }
