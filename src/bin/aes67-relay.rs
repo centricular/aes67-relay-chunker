@@ -193,10 +193,18 @@ impl JitterbufferStats {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum ClockSync {
+    None,
+    Pending,
+    Synchronised,
+}
+
 #[derive(Debug)]
 struct RelayCtx {
     jb: Option<gst::Element>,
     stats: JitterbufferStats,
+    clock_sync: ClockSync,
 }
 
 impl Default for RelayCtx {
@@ -208,6 +216,7 @@ impl Default for RelayCtx {
                 n_lost: 0,
                 time: gst::util_get_timestamp(),
             },
+            clock_sync: ClockSync::None,
         }
     }
 }
@@ -316,6 +325,11 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         if let Some(gst::PadProbeData::Buffer(ref buffer)) = probe_info.data {
             match buffer.meta::<gst::meta::ReferenceTimestampMeta>() {
                 Some(ref meta) => {
+                    let mut ctx = ctx_padprobe.lock().unwrap();
+                    if ctx.clock_sync != ClockSync::Synchronised {
+                        ctx.clock_sync = ClockSync::Synchronised;
+                    }
+
                     let abs_ts = meta.timestamp();
 
                     let sample_rate = 48000; // FIXME: don't hardcode
@@ -335,7 +349,6 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                         let buf_data = map.unwrap();
                         let digest = md5::compute(buf_data.as_slice());
 
-                        let mut ctx = ctx_padprobe.lock().unwrap();
                         let msg = match &ctx.jb {
                             None => None,
                             Some(jb) => {
@@ -377,8 +390,12 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     }
                 }
                 None => {
-                    if !silent {
-                        println!("No PTP sync yet, dropping buffer");
+                    let mut ctx = ctx_padprobe.lock().unwrap();
+                    if ctx.clock_sync == ClockSync::None {
+                        if !silent {
+                            println!("Acquiring PTP clock sync..");
+                        }
+                        ctx.clock_sync = ClockSync::Pending;
                     }
                     return gst::PadProbeReturn::Drop;
                 }
@@ -483,6 +500,11 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
             return glib::Continue(true);
         }
 
+        if ctx.clock_sync != ClockSync::Synchronised {
+            println!("Waiting for PTP clock sync..");
+            return glib::Continue(true);
+        }
+
         let now = gst::util_get_timestamp();
 
         if now.mseconds() - ctx.stats.time.mseconds() > 1000 {
@@ -500,9 +522,14 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
             let perc_lost = (expected_packets - n_pushed as f64) / expected_packets * 100.0;
 
             eprintln!(
-                "Warning: {secs_since_last_heartbeat:4.1} seconds since last heartbeat! \
+                "Warning: {secs_since_last_heartbeat:4.1} seconds since {}! \
                  {n_pushed:4} packet(s) received since, \
-                 ~{perc_lost:.1}% missing"
+                 ~{perc_lost:.1}% missing",
+                if ctx.clock_sync == ClockSync::Synchronised {
+                    "last heartbeat"
+                } else {
+                    "startup"
+                }
             );
         }
 
