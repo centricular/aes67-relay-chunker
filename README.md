@@ -107,16 +107,10 @@ be dropped.
 
 ### Known Issues
 
- - Sometimes the packet flow seems to stop for 0.5-2 minutes and then resumes
-   with the backlog (rtpjitterbuffer issue?); sometimes a process dies
-   complaining about stdin having been closed. These might all be side effects
-   of putting the relay into the background with `&` in the shell. Perhaps
-   there is also some unexpected interaction with the IPC to the gstreamer
-   `ptp-helper` binary in that case, or it's got to do with multiple relays
-   running in parallel on the same machine. (This is all speculation so far.)
-   Sometimes the stuck flow resumes again when one hits the enter key in the
-   terminal. When the flow gets stuck packets are still being received
-   according to wireshark. Needs more investigating.
+ - (Solved) Sometimes the packet flow seemed to stop for 0.5-2 minutes and then
+   resumes with the backlog. This might only happen with Dante devices where the
+   PTP clock has not actually been synced to an external source, and is fixed by
+   https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/2655
 
  - Lots of possible performance optimisations that could be done, e.g. the
    `rtpjitterbuffer`s inside `sdpsrc` or `rtspsrc` are not strictly needed
@@ -344,10 +338,11 @@ In order to achieve our goal we
 
 ## Requirements
 
-- GStreamer >= 1.21.0.1 (`main` branch as of 22 March 2022 at time of writing), in particular:
-  - [sdpdemux: add media attribute to caps to fix ptp clock handling](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1924)
-  - [rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955)
-  - [rtpjitterbuffer: add "add-reference-timestamp-meta" property](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964)
+- GStreamer >= 1.21.0.1 (`main` branch as of 1 July 2022 at time of writing), in particular:
+  - [sdpdemux: add media attribute to caps to fix ptp clock handling](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1924) (merged)
+  - [rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955) (merged)
+  - [rtpjitterbuffer: add "add-reference-timestamp-meta" property](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964) (merged)
+  - [rtpjitterbuffer: Fix calculation of RFC7273 RTP time period start](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/2655) (unmerged as of 1 July 2022)
 
 ## Build
 

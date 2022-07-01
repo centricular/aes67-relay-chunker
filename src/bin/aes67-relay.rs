@@ -68,6 +68,9 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
     //   (rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations)
     // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964
     //   (rtpjitterbuffer: add "add-reference-timestamp-meta" property)
+    // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/2655
+    //   (rtpjitterbuffer: Fix calculation of RFC7273 RTP time period start)
+
     sdpsrc
         .dynamic_cast_ref::<gst::Bin>()
         .unwrap()
