@@ -141,7 +141,9 @@ the original AES67 stream or the advertised PTP media clock.
    - `flac`: FLAC encoding
    - `aac-fdk`: raw AAC encoding with `fdkaacenc`
    - `aac-vo`: raw AAC encoding with `voaacenc`
+   - `heaacv1-fdk`: HE-AACv1 encoding with `fdkaacenc`
    - `ts-aac-fdk`: AAC encoding with `fdkaacenc` muxed into MPEG-TS container
+   - `ts-heaacv1-fdk`: HE-AACv1 encoding with `fdkaacenc` muxed into MPEG-TS container (implicit signaling, ADTS framing)
    - `ts-aac-vo`: AAC encoding with `voaacenc` muxed into MPEG-TS container
 
  - `--frames-per-chunk <frames-per-chunk>`: How many (encoded) frames

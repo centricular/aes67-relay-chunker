@@ -12,7 +12,7 @@ mod audio_chunker;
 mod fragment_enc;
 mod rtp_hdr_ext;
 
-use fragment_enc::frame::EncodedFrame;
+use fragment_enc::frame::*;
 
 use clap::{Arg, Command};
 
@@ -190,7 +190,7 @@ fn main() {
                 .short('e')
                 .long("encoding")
                 .help("Encoding (and muxing) of assembled audio chunks")
-                .possible_values(["ts-aac-fdk", "ts-aac-vo", "aac-fdk", "aac-vo", "flac", "none"])
+                .possible_values(["ts-aac-fdk", "ts-heaacv1-fdk", "ts-aac-vo", "aac-fdk", "heaacv1-fdk", "aac-vo", "flac", "none"])
                 .default_value("flac"),
         )
         .arg(
@@ -291,23 +291,39 @@ for reproducibility",
 
     let encoding = matches.value_of("encoding").unwrap();
 
-    let enc = match encoding {
+    let (enc, enc_caps) = match encoding {
         "aac-fdk" | "ts-aac-fdk" => {
             let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
-            aacenc
+            (aacenc, None)
+        }
+        "heaacv1-fdk" | "ts-heaacv1-fdk" => {
+            let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+            aacenc.set_property("perfect-timestamp", false);
+            aacenc.set_property("tolerance", 0i64);
+            aacenc.set_property("hard-resync", true); // use for flacenc too?
+
+            // TODO: This requires the fdkaacenc HE-AACv1 support from
+            // https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1785
+            // but the profile name string might still change in future versions
+            // before it gets merged into main.
+            let encoder_caps = gst::Caps::builder("audio/mpeg")
+                .field("profile", "sbr")
+                .build();
+
+            (aacenc, Some(encoder_caps))
         }
         "aac-vo" | "ts-aac-vo" => {
             let aacenc = gst::ElementFactory::make("voaacenc", None).unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
-            aacenc
+            (aacenc, None)
         }
-        "flac" => fragment_enc::flac::make_flacenc(),
-        "none" => gst::ElementFactory::make("identity", None).unwrap(),
+        "flac" => (fragment_enc::flac::make_flacenc(), None),
+        "none" => (gst::ElementFactory::make("identity", None).unwrap(), None),
         _ => unreachable!(),
     };
 
@@ -315,14 +331,20 @@ for reproducibility",
     let encoder_stabilisation_frames = match encoding {
         "none" | "flac" => 0,
         "aac-fdk" | "ts-aac-fdk" => 100,
+        "heaacv1-fdk" | "ts-heaacv1-fdk" => 100, // FIXME: untested
         "aac-vo" | "ts-aac-vo" => 60,
         _ => unreachable!(),
     };
 
-    let mux_mpegts = encoding.starts_with("ts-aac");
+    let mux_mpegts = encoding.starts_with("ts-");
 
     let sink = gst::ElementFactory::make("appsink", None).unwrap();
     sink.set_property("sync", false);
+
+    // Caps on appsink will force the encoder to output a specific profile
+    if let Some(encoder_caps) = enc_caps {
+        sink.set_property("caps", encoder_caps);
+    }
 
     pipeline
         .add_many(&[&source, &depayloader, &chunker, &conv, &enc, &sink])
@@ -359,6 +381,7 @@ for reproducibility",
 
                 let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                 let buf = sample.buffer().unwrap().copy();
+
                 gst_trace!(
                     CAT,
                     obj: appsink.upcast_ref::<gst::Element>(),
@@ -366,9 +389,25 @@ for reproducibility",
                     buf,
                 );
 
+                let s = sample.caps().unwrap().structure(0).unwrap();
+                let frame_format = match s.name() {
+                    "audio/mpeg" => {
+                        let profile = s.get::<&str>("profile").unwrap();
+                        let base_profile = s.get::<&str>("base-profile").unwrap_or(profile);
+                        match profile {
+                            "lc" => EncodedFrameFormat::AacLc,
+                            "sbr" if base_profile == "lc" => EncodedFrameFormat::AacLcSbrExt,
+                            _ => unimplemented!("Profile {profile} with base profile {base_profile} not yet supported!"),
+                        }
+                    }
+                    "audio/x-flac" => EncodedFrameFormat::Flac,
+                    _ => EncodedFrameFormat::Other,
+                };
+
                 collector.frames.push(EncodedFrame {
                     pts: buf.pts(),
                     buffer: buf,
+                    format: frame_format,
                 });
 
                 Ok(gst::FlowSuccess::Ok)

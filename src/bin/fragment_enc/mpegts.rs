@@ -10,7 +10,7 @@
 
 mod tests;
 
-use crate::EncodedFrame;
+use crate::{EncodedFrame, EncodedFrameFormat};
 
 use gst::prelude::*;
 
@@ -248,7 +248,7 @@ fn make_adts_header(aac_config: &AacConfig, frame_size: usize) -> Vec<u8> {
 
     assert_eq!(mpeg_version, 4);
     assert_eq!(channels, 2);
-    assert_eq!(rate, 48000);
+    assert!(rate == 48000 || rate == 24000);
     assert_eq!(aot, AAC_AOT_LC);
     assert!(aot <= 4);
 
@@ -258,6 +258,7 @@ fn make_adts_header(aac_config: &AacConfig, frame_size: usize) -> Vec<u8> {
     hdr.extend((0b11111111_11110000u16 | 0b0001u16).to_be_bytes());
 
     let rate_idx: u8 = match rate {
+        24000 => 6,
         48000 => 3,
         _ => unimplemented!("Sample rate {}", rate),
     };
@@ -298,7 +299,7 @@ use PesCounterPadding::*;
 
 // If n_packets_written is passed, the number of AAC TS packets written will be
 // padded out to a multiple of 16 (taking into account the number of packets
-// written so far), so this would typically set for the last PES in a chunk.
+// written so far), so this would typically be set for the last PES in a chunk.
 fn write_pes(
     buf: &mut Vec<u8>,
     aac_config: &AacConfig,
@@ -557,9 +558,17 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
     let n_frames = frames.len();
     //println!("{}", n_frames);
 
+    let frame_format = &frames[0].format;
+
+    let adts_hdr_sample_rate = match frame_format {
+        EncodedFrameFormat::AacLc => 48000,
+        EncodedFrameFormat::AacLcSbrExt => 24000,
+        _ => unimplemented!("frame format {frame_format:?}"),
+    };
+
     let aac_config = AacConfig {
         mpeg_version: 4,
-        rate: 48000,
+        rate: adts_hdr_sample_rate,
         channels: 2,
         aot: AAC_AOT_LC,
     };
