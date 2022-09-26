@@ -194,6 +194,14 @@ fn main() {
                 .default_value("flac"),
         )
         .arg(
+            Arg::new("bitrate")
+                .short('b')
+                .long("bitrate")
+                .help("Bitrate of encoded audio for lossy formats, in bits per second")
+                .takes_value(true)
+                .value_name("BITRATE")
+        )
+        .arg(
             Arg::new("frames-per-chunk")
                 .short('f')
                 .long("frames-per-chunk")
@@ -335,6 +343,12 @@ for reproducibility",
         "aac-vo" | "ts-aac-vo" => 60,
         _ => unreachable!(),
     };
+
+    if encoding.contains("aac") {
+        if let Ok(bitrate) = matches.value_of_t::<i32>("bitrate") {
+            enc.set_property("bitrate", bitrate);
+        }
+    }
 
     let mux_mpegts = encoding.starts_with("ts-");
 
