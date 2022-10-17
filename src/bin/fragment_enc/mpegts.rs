@@ -10,8 +10,10 @@
 
 mod tests;
 
+use crate::EncodedFrameFormat::*;
 use crate::{EncodedFrame, EncodedFrameFormat};
 
+use bitstream_io::{BigEndian, BitWrite, BitWriter};
 use gst::prelude::*;
 
 const PES_HEADER_LEN: usize = 22;
@@ -231,6 +233,8 @@ pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8) {
 const ADTS_HEADER_LEN: usize = 7; // Header without CRC
 
 const AAC_AOT_LC: u8 = 2;
+const AAC_AOT_SBR: u8 = 5;
+const _AAC_AOT_PS: u8 = 29;
 
 struct AacConfig {
     mpeg_version: u8,
@@ -291,7 +295,7 @@ fn make_adts_header(aac_config: &AacConfig, frame_size: usize) -> Vec<u8> {
 }
 
 // Returns ADTS-framed AAC data
-fn write_aac_frames(frames: &[EncodedFrame]) -> Vec<u8> {
+fn write_adts_frames(frames: &[EncodedFrame]) -> Vec<u8> {
     let frame_format = &frames[0].format;
 
     let adts_hdr_sample_rate = match frame_format {
@@ -330,6 +334,134 @@ fn write_aac_frames(frames: &[EncodedFrame]) -> Vec<u8> {
     //println!("ADTS: {:02x?}", adts);
 
     adts
+}
+
+const LATM_HEADER_LEN: usize = 8;
+const LATM_FIRST_HEADER_LEN: usize = 14;
+
+// Returns LATM-framed AAC data
+fn write_latm_frames(frames: &[EncodedFrame]) -> Vec<u8> {
+    assert_eq!(frames[0].format, AacLcSbrPs);
+
+    // Keep it simple and readable for now, can optimise it later if needed. This is just an
+    // estimate to pre-allocate the initial vec in order to avoid re-allocations.
+    let est_payload_bytes = frames
+        .iter()
+        .fold(0, |sum, frame| sum + LATM_HEADER_LEN + frame.buffer.size())
+        + (LATM_FIRST_HEADER_LEN - LATM_HEADER_LEN);
+
+    let mut latm = Vec::<u8>::with_capacity(est_payload_bytes);
+
+    let mut bits = BitWriter::endian(&mut latm, BigEndian);
+
+    for (n, frame) in frames.iter().enumerate() {
+        let map = frame.buffer.map_readable();
+        let map_data = map.unwrap();
+        let frame_data = map_data.as_slice();
+        let frame_len = frame_data.len();
+
+        assert!(frame_len <= 0x1ff8); // 13 bits, minus space for the headers
+
+        // AudioSyncStream - Table 1.36
+        bits.write(11, 0x2B7).unwrap(); // sync bits
+
+        // Only write StreamMuxConfig for first frame/header in PES
+        let is_first = n == 0;
+
+        // AudioMuxLengthBytes
+        let payload_length_info_len = frame_len as u32 / 255 + 1;
+        bits.write(
+            13,
+            if is_first {
+                7 + payload_length_info_len + frame_len as u32
+            } else {
+                1 + payload_length_info_len + frame_len as u32
+            },
+        )
+        .unwrap();
+
+        // AudioMuxElement (muxConfigPresent=1)
+        if is_first {
+            bits.write(1, 0).unwrap(); // useSameStreamMux
+
+            // StreamMuxConfig
+            {
+                bits.write(1, 0).unwrap(); // audioMuxVersion
+                bits.write(1, 1).unwrap(); // allStreamsSameTimeFraming
+                bits.write(6, 0).unwrap(); // numSubFrames
+                bits.write(4, 0).unwrap(); // numProgram
+                bits.write(3, 0).unwrap(); // useSameStreamMux
+
+                // AudioSpecificConfig - Table 1.15, p52 - we use Hierarchical Signaling here as
+                // recommended by the Fraunhofer AAC Transport Formats Application Bulletin
+                {
+                    bits.write(5, AAC_AOT_SBR).unwrap(); // audioObjectType
+                    bits.write(4, 6).unwrap(); // samplingFrequencyIndex (6 = 24kHz)
+                    bits.write(4, 1).unwrap(); // channelConfiguration (1 = 1ch)
+                    bits.write(4, 3).unwrap(); // extensionSamplingFrequencyIndex (3 = 48KHz)
+                    bits.write(5, AAC_AOT_LC).unwrap(); // audioObjectType
+
+                    // GASpecificConfig - Table 4.1, p487
+                    {
+                        bits.write(1, 0).unwrap(); // frameLengthFlag -> frameLength=1024
+                        bits.write(1, 0).unwrap(); // dependsOnCoreCoder
+                        bits.write(1, 0).unwrap(); // extensionFlag
+                    }
+                }
+
+                bits.write(3, 0).unwrap(); // frameLengthType
+                bits.write(8, 0xff).unwrap(); // latmBufferFullness
+                bits.write(1, 0).unwrap(); // otherDataPresent
+                bits.write(1, 0).unwrap(); // crcCheckPresent
+            }
+        } else {
+            bits.write(1, 1).unwrap(); // useSameStreamMux
+        }
+
+        // PayloadLengthInfo - Table 1.44, p70
+        let mut tmp = frame_len as u32;
+        while tmp >= 255 {
+            bits.write(8, 255).unwrap();
+            tmp -= 255;
+        }
+        bits.write(8, tmp).unwrap();
+
+        const AAC_RDB_ID_DSE: u8 = 0x4;
+
+        // PayloadMux - The frame data is not written byte-aligned but follows the headers directly.
+        // If the first raw data block is a DSE block, we need to clear the data_byte_align flag in
+        // the block header (later blocks will be byte aligned, so only need to sort out first).
+        // Table 4.10, p491 – Syntax of data_stream_element()
+        let first_payload_byte = match frame_data[0] >> 5 {
+            AAC_RDB_ID_DSE if frame_data[0] & 0x01 == 1 => frame_data[0] & 0xfe,
+            _ => frame_data[0],
+        };
+        bits.write(8, first_payload_byte).unwrap();
+        bits.write_bytes(&frame_data[1..]).unwrap();
+
+        bits.byte_align().unwrap();
+    }
+
+    // Add padding bits to next byte boundary so trailing bits don't get dropped
+    bits.byte_align().unwrap();
+
+    // Want to overestimate, so if this is triggered we need to tweak the formula above
+    assert!(latm.len() <= est_payload_bytes);
+
+    //println!("LATM: {:02x?}", adts);
+
+    latm
+}
+
+// Returns ADTS or LATM framed AAC data
+fn write_aac_frames(frames: &[EncodedFrame]) -> Vec<u8> {
+    let aac_data = match frames[0].format {
+        AacLc | AacLcSbrExt => write_adts_frames(&frames),
+        AacLcSbrPs => write_latm_frames(&frames),
+        _ => unimplemented!(),
+    };
+
+    aac_data
 }
 
 #[derive(Debug)]

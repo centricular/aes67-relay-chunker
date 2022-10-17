@@ -8,8 +8,6 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::EncodedFrameFormat::AacLc;
-
 #[cfg(test)]
 #[test]
 fn write_pes_183bytes_in_last_packet() {

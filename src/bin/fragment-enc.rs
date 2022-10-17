@@ -190,7 +190,7 @@ fn main() {
                 .short('e')
                 .long("encoding")
                 .help("Encoding (and muxing) of assembled audio chunks")
-                .possible_values(["ts-aac-fdk", "ts-heaacv1-fdk", "ts-aac-vo", "aac-fdk", "heaacv1-fdk", "aac-vo", "flac", "none"])
+                .possible_values(["ts-aac-fdk", "ts-heaacv1-fdk", "ts-heaacv2-fdk", "ts-aac-vo", "aac-fdk", "heaacv1-fdk", "heaacv2-fdk", "aac-vo", "flac", "none"])
                 .default_value("flac"),
         )
         .arg(
@@ -320,6 +320,24 @@ for reproducibility",
             // before it gets merged into main.
             let encoder_caps = gst::Caps::builder("audio/mpeg")
                 .field("profile", "he-aac-v1")
+                .field("stream-format", "raw")
+                .build();
+
+            (aacenc, Some(encoder_caps))
+        }
+        "heaacv2-fdk" | "ts-heaacv2-fdk" => {
+            let aacenc = gst::ElementFactory::make("fdkaacenc").build().unwrap();
+            aacenc.set_property("perfect-timestamp", false);
+            aacenc.set_property("tolerance", 0i64);
+            aacenc.set_property("hard-resync", true); // use for flacenc too?
+
+            // TODO: This requires the fdkaacenc HE-AACv2 support from
+            // https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1785
+            // but the profile name string might still change in future versions
+            // before it gets merged into main.
+            let encoder_caps = gst::Caps::builder("audio/mpeg")
+                .field("profile", "he-aac-v2")
+                .field("stream-format", "raw")
                 .build();
 
             (aacenc, Some(encoder_caps))
@@ -341,6 +359,7 @@ for reproducibility",
         "none" | "flac" => 0,
         "aac-fdk" | "ts-aac-fdk" => 100,
         "heaacv1-fdk" | "ts-heaacv1-fdk" => 100, // FIXME: untested
+        "heaacv2-fdk" | "ts-heaacv2-fdk" => 100, // FIXME: untested
         "aac-vo" | "ts-aac-vo" => 60,
         _ => unreachable!(),
     };
@@ -412,6 +431,7 @@ for reproducibility",
                         match profile {
                             "lc" => EncodedFrameFormat::AacLc,
                             "he-aac-v1" if base_profile == "lc" => EncodedFrameFormat::AacLcSbrExt,
+                            "he-aac-v2" => EncodedFrameFormat::AacLcSbrPs,
                             _ => unimplemented!("Profile {profile} with base profile {base_profile} not yet supported!"),
                         }
                     }
@@ -598,6 +618,9 @@ for reproducibility",
         pipeline
             .set_state(gst::State::Null)
             .expect("Failed to shut down the pipeline");
+
+        // Sleep a little. We might also restart in case of panics, so throttle.
+        std::thread::sleep(std::time::Duration::from_secs(1));
 
         println!("Restarting pipeline...");
     }

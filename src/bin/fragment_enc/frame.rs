@@ -8,10 +8,11 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum EncodedFrameFormat {
     AacLc,
     AacLcSbrExt, // HE-AACv1 with implicit/backwards-compatible signalling
+    AacLcSbrPs,  // HE-AACv2
     Flac,
     Other,
 }
