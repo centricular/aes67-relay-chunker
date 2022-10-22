@@ -15,8 +15,6 @@ use gst_rtp::RTPHeaderExtensionFlags;
 
 use once_cell::sync::Lazy;
 
-use gst::gst_log;
-
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     gst::DebugCategory::new(
         "xrtphdrextptp",
@@ -58,17 +56,16 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
     // Not sure if we can easily use RTP_HDREXT_BASE here
     const URI: &'static str = "urn:ietf:params:rtp-hdrext:x-ptp";
 
-    fn supported_flags(&self, _element: &Self::Type) -> RTPHeaderExtensionFlags {
+    fn supported_flags(&self) -> RTPHeaderExtensionFlags {
         RTPHeaderExtensionFlags::ONE_BYTE | RTPHeaderExtensionFlags::TWO_BYTE
     }
 
-    fn max_size(&self, _element: &Self::Type, _input: &gst::BufferRef) -> usize {
+    fn max_size(&self, _input: &gst::BufferRef) -> usize {
         8 // just a 64-bit timestamp for now
     }
 
     fn write(
         &self,
-        element: &Self::Type,
         _input: &gst::BufferRef,
         _write_flags: RTPHeaderExtensionFlags,
         output: &mut gst::BufferRef,
@@ -82,9 +79,9 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
             None => return Err(gst::loggable_error!(gst::CAT_RUST, "No PTP sync yet")),
         };
 
-        gst_log!(
+        gst::log!(
             CAT,
-            obj: element,
+            imp: self,
             "Writing timestamp {:?} duration {:?}",
             pts,
             output.duration()
@@ -99,7 +96,6 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
 
     fn read(
         &self,
-        element: &Self::Type,
         _read_flags: RTPHeaderExtensionFlags,
         input_data: &[u8],
         output: &mut gst::BufferRef,
@@ -118,9 +114,9 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
             input_data[7],
         ]);
 
-        gst_log!(
+        gst::log!(
             CAT,
-            obj: element,
+            imp: self,
             "Read timestamp {:?} duration {:?}",
             pts,
             output.duration()

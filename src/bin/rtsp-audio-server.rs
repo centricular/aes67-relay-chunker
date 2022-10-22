@@ -35,7 +35,8 @@ fn main_loop() -> Result<(), Error> {
     // Disable RTCP (esp. Sender Reports)
     factory.set_enable_rtcp(false);
 
-    let ntp_clock = gst_net::NtpClock::new(None, "pool.ntp.org", 123, gst::ClockTime::from_nseconds(0));
+    let ntp_clock =
+        gst_net::NtpClock::new(None, "pool.ntp.org", 123, gst::ClockTime::from_nseconds(0));
 
     // Wait for clock to be synced
     ntp_clock.wait_for_sync(None).unwrap();
@@ -56,9 +57,7 @@ fn main_loop() -> Result<(), Error> {
         server.bound_port()
     );
 
-    println!(
-        "WARNING: rfc7273 sync does not seem functional at the moment, needs investigating!"
-    );
+    println!("WARNING: rfc7273 sync does not seem functional at the moment, needs investigating!");
 
     // Start the main loop
     main_loop.run();

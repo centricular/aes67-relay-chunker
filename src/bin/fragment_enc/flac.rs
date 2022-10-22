@@ -15,7 +15,7 @@ use gst::prelude::*;
 // PTP time in order to get consistent/reproducible output. And once we modify
 // that we'll also have to fix up various CRC checksums in the frame.
 pub fn make_flacenc() -> gst::Element {
-    let flacenc = gst::ElementFactory::make("flacenc", None).unwrap();
+    let flacenc = gst::ElementFactory::make("flacenc").build().unwrap();
 
     // To match AAC; make configurable? But note that 'odd' values might have
     // implications about the frame header layout assumed in pad probe below!

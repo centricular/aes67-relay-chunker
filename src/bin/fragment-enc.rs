@@ -17,7 +17,6 @@ use fragment_enc::frame::*;
 use clap::{Arg, Command};
 
 use gst::prelude::*;
-use gst::{gst_info, gst_trace};
 use gst::{Caps, ClockTime, ReferenceTimestampMeta};
 use gst_rtp::prelude::RTPHeaderExtensionExt;
 
@@ -51,7 +50,7 @@ fn create_srt_input(srt_url: &Url) -> gst::Element {
     //src.set_property("latency", 125);
     //src.set_property("wait-for-connection", false);
 
-    let capsfilter = gst::ElementFactory::make("capsfilter", None).unwrap();
+    let capsfilter = gst::ElementFactory::make("capsfilter").build().unwrap();
 
     // maybe we should use rtpgdp payloading?
     capsfilter.set_property(
@@ -112,7 +111,7 @@ fn create_udp_input(udp_url: &Url) -> gst::Element {
 fn create_test_input() -> gst::Element {
     let bin = gst::Bin::new(Some("test-source"));
 
-    let src = gst::ElementFactory::make("audiotestsrc", None).unwrap();
+    let src = gst::ElementFactory::make("audiotestsrc").build().unwrap();
     src.set_property("is-live", true);
     src.set_property("samplesperbuffer", 48i32);
     src.set_property_from_str("wave", "ticks");
@@ -134,7 +133,7 @@ fn create_test_input() -> gst::Element {
         gst::PadProbeReturn::Ok
     });
 
-    let capsfilter = gst::ElementFactory::make("capsfilter", None).unwrap();
+    let capsfilter = gst::ElementFactory::make("capsfilter").build().unwrap();
 
     capsfilter.set_property(
         "caps",
@@ -144,13 +143,14 @@ fn create_test_input() -> gst::Element {
             .build(),
     );
 
-    let payloader = gst::ElementFactory::make("rtpL24pay", None).unwrap();
+    let payloader = gst::ElementFactory::make("rtpL24pay").build().unwrap();
     payloader.set_property("min-ptime", 1_000_000i64);
     payloader.set_property("max-ptime", 1_000_000i64);
     payloader.set_property("auto-header-extension", false);
 
     // Set things up to add our RTP header extension data
-    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
+    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp")
+        .build()
         .unwrap()
         .downcast::<gst_rtp::RTPHeaderExtension>()
         .unwrap();
@@ -265,11 +265,12 @@ for reproducibility",
         scheme => unimplemented!("Unhandled protocol {}", scheme),
     };
 
-    let depayloader = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+    let depayloader = gst::ElementFactory::make("rtpL24depay").build().unwrap();
     depayloader.set_property("auto-header-extension", false);
 
     // Set things up to retrieve our RTP header extension data
-    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
+    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp")
+        .build()
         .unwrap()
         .downcast::<gst_rtp::RTPHeaderExtension>()
         .unwrap();
@@ -278,7 +279,7 @@ for reproducibility",
 
     depayloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
-    let chunker = gst::ElementFactory::make("x-audiochunker", None).unwrap();
+    let chunker = gst::ElementFactory::make("x-audiochunker").build().unwrap();
     let frames_per_chunk: u32 = matches.value_of_t("frames-per-chunk").unwrap();
     chunker.set_property("frames-per-chunk", frames_per_chunk);
 
@@ -290,7 +291,7 @@ for reproducibility",
         std::process::exit(1);
     }
 
-    let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
+    let conv = gst::ElementFactory::make("audioconvert").build().unwrap();
 
     // Disable dithering as it would mess with the sample values by adding
     // random values and is also not really needed when feeding into an
@@ -301,14 +302,14 @@ for reproducibility",
 
     let (enc, enc_caps) = match encoding {
         "aac-fdk" | "ts-aac-fdk" => {
-            let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+            let aacenc = gst::ElementFactory::make("fdkaacenc").build().unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
             (aacenc, None)
         }
         "heaacv1-fdk" | "ts-heaacv1-fdk" => {
-            let aacenc = gst::ElementFactory::make("fdkaacenc", None).unwrap();
+            let aacenc = gst::ElementFactory::make("fdkaacenc").build().unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
@@ -324,14 +325,14 @@ for reproducibility",
             (aacenc, Some(encoder_caps))
         }
         "aac-vo" | "ts-aac-vo" => {
-            let aacenc = gst::ElementFactory::make("voaacenc", None).unwrap();
+            let aacenc = gst::ElementFactory::make("voaacenc").build().unwrap();
             aacenc.set_property("perfect-timestamp", false);
             aacenc.set_property("tolerance", 0i64);
             aacenc.set_property("hard-resync", true); // use for flacenc too?
             (aacenc, None)
         }
         "flac" => (fragment_enc::flac::make_flacenc(), None),
-        "none" => (gst::ElementFactory::make("identity", None).unwrap(), None),
+        "none" => (gst::ElementFactory::make("identity").build().unwrap(), None),
         _ => unreachable!(),
     };
 
@@ -352,7 +353,7 @@ for reproducibility",
 
     let mux_mpegts = encoding.starts_with("ts-");
 
-    let sink = gst::ElementFactory::make("appsink", None).unwrap();
+    let sink = gst::ElementFactory::make("appsink").build().unwrap();
     sink.set_property("sync", false);
 
     // Caps on appsink will force the encoder to output a specific profile
@@ -396,7 +397,7 @@ for reproducibility",
                 let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                 let buf = sample.buffer().unwrap().copy();
 
-                gst_trace!(
+                gst::trace!(
                     CAT,
                     obj: appsink.upcast_ref::<gst::Element>(),
                     "{:?}",
@@ -515,7 +516,7 @@ for reproducibility",
 
                                 println!("{:?}: {:?} {}", pts, digest, msg);
 
-                                gst_info!(
+                                gst::info!(
                                     CAT,
                                     obj: appsink.upcast_ref::<gst::Element>(),
                                     "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",

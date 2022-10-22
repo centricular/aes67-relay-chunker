@@ -16,8 +16,6 @@ use once_cell::sync::Lazy;
 
 use std::sync::Mutex;
 
-use gst::{gst_debug, gst_error, gst_info, gst_log, gst_trace};
-
 // 1024 samples is the default frame size in AAC (960 is theoretically
 // also possible, but none of our encoders support that unfortunately)
 const DEFAULT_SAMPLES_PER_FRAME: u32 = 1024;
@@ -93,15 +91,11 @@ impl ObjectSubclass for AudioChunker {
                 Self::catch_panic_pad_function(
                     parent,
                     || Err(gst::FlowError::Error),
-                    |this, element| this.sink_chain(pad, element, buffer),
+                    |this| this.sink_chain(pad, buffer),
                 )
             })
             .event_function(|pad, parent, event| {
-                Self::catch_panic_pad_function(
-                    parent,
-                    || false,
-                    |this, element| this.sink_event(pad, element, event),
-                )
+                Self::catch_panic_pad_function(parent, || false, |this| this.sink_event(pad, event))
             })
             .flags(gst::PadFlags::PROXY_CAPS)
             .build();
@@ -109,11 +103,7 @@ impl ObjectSubclass for AudioChunker {
         let templ = klass.pad_template("src").unwrap();
         let srcpad = gst::Pad::builder_with_template(&templ, Some("src"))
             .query_function(|pad, parent, query| {
-                Self::catch_panic_pad_function(
-                    parent,
-                    || false,
-                    |this, element| this.src_query(pad, element, query),
-                )
+                Self::catch_panic_pad_function(parent, || false, |this| this.src_query(pad, query))
             })
             .flags(gst::PadFlags::PROXY_CAPS)
             .build();
@@ -128,11 +118,11 @@ impl ObjectSubclass for AudioChunker {
 }
 
 impl ObjectImpl for AudioChunker {
-    fn constructed(&self, obj: &Self::Type) {
-        self.parent_constructed(obj);
+    fn constructed(&self) {
+        self.parent_constructed();
 
-        obj.add_pad(&self.sinkpad).unwrap();
-        obj.add_pad(&self.srcpad).unwrap();
+        self.instance().add_pad(&self.sinkpad).unwrap();
+        self.instance().add_pad(&self.srcpad).unwrap();
     }
 
     fn properties() -> &'static [glib::ParamSpec] {
@@ -162,13 +152,7 @@ impl ObjectImpl for AudioChunker {
         PROPERTIES.as_ref()
     }
 
-    fn set_property(
-        &self,
-        _obj: &Self::Type,
-        _id: usize,
-        value: &glib::Value,
-        pspec: &glib::ParamSpec,
-    ) {
+    fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
         let mut settings = self.settings.lock().unwrap();
         match pspec.name() {
             "frames-per-chunk" => {
@@ -181,7 +165,7 @@ impl ObjectImpl for AudioChunker {
         };
     }
 
-    fn property(&self, _obj: &Self::Type, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
+    fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
         let settings = self.settings.lock().unwrap();
         match pspec.name() {
             "frames-per-chunk" => settings.frames_per_chunk.to_value(),
@@ -247,10 +231,9 @@ impl ElementImpl for AudioChunker {
     #[allow(clippy::single_match)]
     fn change_state(
         &self,
-        element: &Self::Type,
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        let res = self.parent_change_state(element, transition);
+        let res = self.parent_change_state(transition);
 
         match transition {
             gst::StateChange::PausedToReady => {
@@ -265,7 +248,7 @@ impl ElementImpl for AudioChunker {
 }
 
 impl AudioChunker {
-    fn advance_chunk(&self, element: &super::AudioChunker, state: &mut State, pos: u64) {
+    fn advance_chunk(&self, state: &mut State, pos: u64) {
         let samples_per_chunk = state.chunk_samples;
 
         let (new_start, new_stop) = match state.cur_chunk {
@@ -275,9 +258,9 @@ impl AudioChunker {
 
         state.cur_chunk = Some((new_start, new_stop, new_start + pos));
 
-        gst_debug!(
+        gst::debug!(
             CAT,
-            obj: element,
+            imp: self,
             "Starting new chunk: {}-{}, pos {}",
             new_start,
             new_stop,
@@ -288,16 +271,15 @@ impl AudioChunker {
     fn sink_chain(
         &self,
         _pad: &gst::Pad,
-        element: &super::AudioChunker,
         mut buffer: gst::Buffer,
     ) -> Result<gst::FlowSuccess, gst::FlowError> {
-        gst_log!(CAT, obj: element, "Handling buffer {:?}", buffer);
+        gst::log!(CAT, imp: self, "Handling buffer {:?}", buffer);
 
         let mut state_guard = self.state.lock().unwrap();
 
         let mut state = match *state_guard {
             None => {
-                gst_error!(CAT, obj: element, "Not negotiated yet");
+                gst::error!(CAT, imp: self, "Not negotiated yet");
                 return Err(gst::FlowError::NotNegotiated);
             }
             Some(ref mut state) => state,
@@ -320,9 +302,9 @@ impl AudioChunker {
 
         let abs_end_off = abs_off.checked_add(n_samples).unwrap();
 
-        gst_log!(
+        gst::log!(
             CAT,
-            obj: element,
+            imp: self,
             "absolute ts: {:?}, sample offset: {}-{}, n_samples: {}",
             abs_ts,
             abs_off,
@@ -347,9 +329,9 @@ impl AudioChunker {
                 }
             };
 
-            gst_log!(
+            gst::log!(
                 CAT,
-                obj: element,
+                imp: self,
                 "Current chunk: {} @ {}-{} continuity={}",
                 chunk_pos_off,
                 chunk_start_off,
@@ -359,9 +341,9 @@ impl AudioChunker {
 
             // If buffer is entirely before the current chunk position, drop it
             if abs_end_off <= chunk_pos_off {
-                gst_debug!(
+                gst::debug!(
                     CAT,
-                    obj: element,
+                    imp: self,
                     "Buffer entirely before chunk position: {}-{} < {} @ {}-{}, dropping",
                     abs_off,
                     abs_end_off,
@@ -377,9 +359,9 @@ impl AudioChunker {
             if abs_off < chunk_pos_off {
                 let clip_samples = chunk_pos_off - abs_off;
 
-                gst_debug!(
+                gst::debug!(
                     CAT,
-                    obj: element,
+                    imp: self,
                     "Buffer partially before chunk position: {}-{} < {} @ {}-{}, clipping {} samples",
                     abs_off,
                     abs_end_off,
@@ -418,9 +400,9 @@ impl AudioChunker {
             if abs_off > chunk_pos_off {
                 let missing_samples = abs_off - chunk_pos_off;
 
-                gst_debug!(
+                gst::debug!(
                     CAT,
-                    obj: element,
+                    imp: self,
                     "Discontinuity: {} missing samples! Buffer {}-{} after chunk position {} @ {}-{}",
                     missing_samples,
                     abs_off,
@@ -436,7 +418,7 @@ impl AudioChunker {
                 state.adapter.clear();
                 state.continuity_counter = 0;
 
-                self.advance_chunk(element, state, 0);
+                self.advance_chunk(state, 0);
                 continue;
             }
 
@@ -458,18 +440,18 @@ impl AudioChunker {
         while state.adapter.available() >= chunk_size {
             let (chunk_start_off, chunk_end_off, _) = state.cur_chunk.unwrap();
 
-            gst_info!(
+            gst::info!(
                 CAT,
-                obj: element,
+                imp: self,
                 "Completed chunk: {}-{} continuity={}",
                 chunk_start_off,
                 chunk_end_off,
                 state.continuity_counter,
             );
 
-            gst_trace!(
+            gst::trace!(
                 CAT,
-                obj: element,
+                imp: self,
                 "Bytes in adapter: {}",
                 state.adapter.available()
             );
@@ -526,7 +508,7 @@ impl AudioChunker {
             // something, so that we can later drop the first few encoded
             // chunks to make sure the encoder has stabilised its output.
 
-            gst_log!(CAT, obj: element, "Pushing buffer {:?}", outbuf);
+            gst::log!(CAT, imp: self, "Pushing buffer {:?}", outbuf);
 
             self.srcpad.push(outbuf)?;
 
@@ -545,34 +527,29 @@ impl AudioChunker {
 
             let samples_left = state.adapter.available() as u64 / state.info.bpf() as u64;
 
-            gst_log!(
-                CAT,
-                obj: element,
-                "Samples left in adapter: {}",
-                samples_left
-            );
+            gst::log!(CAT, imp: self, "Samples left in adapter: {}", samples_left);
 
-            self.advance_chunk(element, state, samples_left);
+            self.advance_chunk(state, samples_left);
             state.continuity_counter += 1;
         }
 
         Ok(gst::FlowSuccess::Ok)
     }
 
-    fn sink_event(&self, pad: &gst::Pad, element: &super::AudioChunker, event: gst::Event) -> bool {
+    fn sink_event(&self, pad: &gst::Pad, event: gst::Event) -> bool {
         use gst::EventView;
 
-        gst_log!(CAT, obj: pad, "Handling event {:?}", event);
+        gst::log!(CAT, obj: pad, "Handling event {:?}", event);
 
         match event.view() {
             EventView::Caps(c) => {
                 let caps = c.caps();
-                gst_info!(CAT, obj: pad, "Got caps {:?}", caps);
+                gst::info!(CAT, obj: pad, "Got caps {:?}", caps);
 
                 let info = match gst_audio::AudioInfo::from_caps(caps) {
                     Ok(info) => info,
                     Err(_) => {
-                        gst_error!(CAT, obj: pad, "Failed to parse caps");
+                        gst::error!(CAT, obj: pad, "Failed to parse caps");
                         return false;
                     }
                 };
@@ -591,7 +568,7 @@ impl AudioChunker {
 
                 *state = Some(State::new(info, spf, fpc));
 
-                gst_info!(
+                gst::info!(
                     CAT,
                     obj: pad,
                     "Samples per frame: {}, frames per chunk: {}, samples per chunk: {}",
@@ -608,19 +585,14 @@ impl AudioChunker {
             _ => (),
         }
 
-        pad.event_default(Some(element), event)
+        gst::Pad::event_default(pad, Some(&*self.instance()), event)
     }
 
     #[allow(clippy::single_match)]
-    fn src_query(
-        &self,
-        pad: &gst::Pad,
-        element: &super::AudioChunker,
-        query: &mut gst::QueryRef,
-    ) -> bool {
+    fn src_query(&self, pad: &gst::Pad, query: &mut gst::QueryRef) -> bool {
         use gst::QueryViewMut;
 
-        gst_log!(CAT, obj: pad, "Handling query {:?}", query);
+        gst::log!(CAT, obj: pad, "Handling query {:?}", query);
 
         match query.view_mut() {
             QueryViewMut::Latency(q) => {
@@ -656,7 +628,7 @@ impl AudioChunker {
                     false
                 }
             }
-            _ => pad.query_default(Some(element), query),
+            _ => gst::Pad::query_default(pad, Some(&*self.instance()), query),
         }
     }
 }

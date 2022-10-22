@@ -56,7 +56,7 @@ fn create_test_input() -> gst::Element {
 fn create_sdp_input(sdp_url: &Url) -> gst::Element {
     let bin = gst::Bin::new(Some("sdp-source"));
 
-    let sdpsrc = gst::ElementFactory::make("sdpsrc", None).unwrap();
+    let sdpsrc = gst::ElementFactory::make("sdpsrc").build().unwrap();
     sdpsrc.set_property("location", sdp_url.as_str());
 
     // sdpsrc doesn't proxy rtpbin/rtpjitterbuffer properties
@@ -100,7 +100,7 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
             }
         });
 
-    let depayload = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+    let depayload = gst::ElementFactory::make("rtpL24depay").build().unwrap();
 
     let src_pad = depayload.static_pad("src").unwrap();
 
@@ -133,13 +133,13 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
     //   (rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations)
     // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964
     //   (rtpjitterbuffer: add "add-reference-timestamp-meta" property)
-    let rtspsrc = gst::ElementFactory::make("rtspsrc", None).unwrap();
+    let rtspsrc = gst::ElementFactory::make("rtspsrc").build().unwrap();
     rtspsrc.set_property("location", rtsp_url.as_str());
     rtspsrc.set_property("rfc7273-sync", true);
     rtspsrc.set_property("add-reference-timestamp-meta", true);
     rtspsrc.set_property("do-rtcp", false);
 
-    let depayload = gst::ElementFactory::make("rtpL24depay", None).unwrap();
+    let depayload = gst::ElementFactory::make("rtpL24depay").build().unwrap();
 
     let src_pad = depayload.static_pad("src").unwrap();
 
@@ -164,7 +164,7 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
 }
 
 fn create_null_output() -> gst::Element {
-    gst::ElementFactory::make("fakesink", None).unwrap()
+    gst::ElementFactory::make("fakesink").build().unwrap()
 }
 
 // wait-for-connection=false means we will consume buffers and drop them
@@ -315,7 +315,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     };
 
     // For simulating packet drops (not very sophisticated, maybe netsim would be better?)
-    let id = gst::ElementFactory::make("identity", None).unwrap();
+    let id = gst::ElementFactory::make("identity").build().unwrap();
     if matches.is_present("drop-probability") {
         let p_drop_ppm: u32 = matches.value_of_t("drop-probability").unwrap();
         let p: f32 = p_drop_ppm as f32 / 1_000_000.0f32;
@@ -324,7 +324,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     }
 
     // For good measure, shouldn't be needed
-    let conv = gst::ElementFactory::make("audioconvert", None).unwrap();
+    let conv = gst::ElementFactory::make("audioconvert").build().unwrap();
 
     // Jitterbuffer, will be set from message handler via application message
     let ctx = Arc::new(Mutex::new(RelayCtx::default()));
@@ -422,13 +422,14 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     // because that makes everything easier in case we want to add an encoder
     // with larger frame sizes later. Avoids special-casing: we can just use
     // the same mechanism/code for all scenarios.
-    let payloader = gst::ElementFactory::make("rtpL24pay", None).unwrap();
+    let payloader = gst::ElementFactory::make("rtpL24pay").build().unwrap();
     payloader.set_property("min-ptime", 1_000_000i64);
     payloader.set_property("max-ptime", 1_000_000i64);
     payloader.set_property("auto-header-extension", false);
 
     // Set things up to add our RTP header extension data
-    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp", None)
+    let hdr_ext = gst::ElementFactory::make("x-rtphdrextptp")
+        .build()
         .unwrap()
         .downcast::<gst_rtp::RTPHeaderExtension>()
         .unwrap();
@@ -439,7 +440,10 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     const OUTPUT_BACKLOG_LIMIT: u64 = gst::ClockTime::from_seconds(10).nseconds();
 
-    let sink_queue = gst::ElementFactory::make("queue", Some("output-queue")).unwrap();
+    let sink_queue = gst::ElementFactory::make("queue")
+        .name("output-queue")
+        .build()
+        .unwrap();
     sink_queue.set_property("max-size-buffers", 0u32);
     sink_queue.set_property("max-size-bytes", 0u32);
     sink_queue.set_property("max-size-time", OUTPUT_BACKLOG_LIMIT);
