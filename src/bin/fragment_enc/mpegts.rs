@@ -362,9 +362,9 @@ fn write_pes(
     );
     */
 
-    let adts = write_aac_frames(&frames);
+    let aac_data = write_aac_frames(&frames);
 
-    let n_packets = (PES_HEADER_LEN + adts.len() + 183) / 184;
+    let n_packets = (PES_HEADER_LEN + aac_data.len() + 183) / 184;
 
     let n_extra_packets =
         if let PesCounterPadding::PesWithCounterPadding(n_written) = counter_padding {
@@ -379,7 +379,7 @@ fn write_pes(
     // Ensure we always have enough data for 16 packets (1 full + 15); simplifies
     // the code if we don't need to support padding for the first packet with the
     // PES header.
-    assert!(adts.len() > 184 + (CONTINUITY_COUNTER_ROUNDS - 1) - PES_HEADER_LEN);
+    assert!(aac_data.len() > 184 + (CONTINUITY_COUNTER_ROUNDS - 1) - PES_HEADER_LEN);
 
     let mut pes = Vec::<u8>::with_capacity((n_packets + n_extra_packets) * 188);
 
@@ -430,8 +430,8 @@ fn write_pes(
     pes.push(0xC0);
 
     // PES payload length
-    assert!(adts.len() < 65536);
-    pes.extend((adts.len() as u16 + (2 + 1 + 5)).to_be_bytes());
+    assert!(aac_data.len() < 65536);
+    pes.extend((aac_data.len() as u16 + (2 + 1 + 5)).to_be_bytes());
 
     // PES flags - marker + original=1 + PTS_DTS_flags=10=pts-only
     pes.extend((0b10_000001_10_000000u16).to_be_bytes());
@@ -451,11 +451,11 @@ fn write_pes(
     assert_eq!(pes.len(), 26);
 
     // First payload part
-    pes.extend(&adts[0..162]);
+    pes.extend(&aac_data[0..162]);
 
     assert_eq!(pes.len(), 188);
 
-    let mut payload = &adts[162..];
+    let mut payload = &aac_data[162..];
 
     // PES payload packets without any stuffing
     while payload.len() >= (184 + n_extra_packets + 1) {
