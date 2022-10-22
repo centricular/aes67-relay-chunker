@@ -17,12 +17,6 @@ fn write_pes_183bytes_in_last_packet() {
 
     // already written packets (content doesn't matter)
     let mut chunk = vec![0xffu8; 59032];
-    let aac_config = super::AacConfig {
-        mpeg_version: 4,
-        channels: 2,
-        rate: 48000,
-        aot: 2,
-    };
 
     use super::EncodedFrame;
 
@@ -55,13 +49,7 @@ fn write_pes_183bytes_in_last_packet() {
     ];
 
     let mut cc: u8 = 8;
-    super::write_pes(
-        &mut chunk,
-        &aac_config,
-        &frames,
-        &mut cc,
-        super::PesNoCounterPadding,
-    );
+    super::write_pes(&mut chunk, &frames, &mut cc, super::PesNoCounterPadding);
 }
 
 #[cfg(test)]
@@ -71,12 +59,6 @@ fn write_pes_no_stuffing_needed() {
 
     // already written packets (content doesn't matter)
     let mut chunk = vec![0xffu8; 59032];
-    let aac_config = super::AacConfig {
-        mpeg_version: 4,
-        channels: 2,
-        rate: 48000,
-        aot: 2,
-    };
 
     use super::EncodedFrame;
 
@@ -108,13 +90,7 @@ fn write_pes_no_stuffing_needed() {
         },
     ];
     let mut cc: u8 = 8;
-    super::write_pes(
-        &mut chunk,
-        &aac_config,
-        &frames,
-        &mut cc,
-        super::PesNoCounterPadding,
-    );
+    super::write_pes(&mut chunk, &frames, &mut cc, super::PesNoCounterPadding);
 }
 
 #[cfg(test)]
@@ -124,12 +100,6 @@ fn write_pes_184byte_payload_for_last_packet() {
 
     // already written packets (content doesn't matter)
     let mut chunk = vec![0xffu8; 63544];
-    let aac_config = super::AacConfig {
-        mpeg_version: 4,
-        channels: 2,
-        rate: 48000,
-        aot: 2,
-    };
 
     use super::EncodedFrame;
 
@@ -164,7 +134,6 @@ fn write_pes_184byte_payload_for_last_packet() {
     let mut cc: u8 = 0;
     super::write_pes(
         &mut chunk,
-        &aac_config,
         &frames,
         &mut cc,
         super::PesWithCounterPadding(336),

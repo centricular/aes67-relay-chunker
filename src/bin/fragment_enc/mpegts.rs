@@ -290,6 +290,48 @@ fn make_adts_header(aac_config: &AacConfig, frame_size: usize) -> Vec<u8> {
     hdr
 }
 
+// Returns ADTS-framed AAC data
+fn write_aac_frames(frames: &[EncodedFrame]) -> Vec<u8> {
+    let frame_format = &frames[0].format;
+
+    let adts_hdr_sample_rate = match frame_format {
+        EncodedFrameFormat::AacLc => 48000,
+        EncodedFrameFormat::AacLcSbrExt => 24000,
+        _ => unimplemented!("frame format {frame_format:?}"),
+    };
+
+    let aac_config = AacConfig {
+        mpeg_version: 4,
+        rate: adts_hdr_sample_rate,
+        channels: 2,
+        aot: AAC_AOT_LC,
+    };
+
+    // Keep it simple and readable for now, can optimise it later if needed
+    let payload_bytes = frames
+        .iter()
+        .fold(0, |sum, frame| sum + ADTS_HEADER_LEN + frame.buffer.size());
+
+    let mut adts = Vec::<u8>::with_capacity(payload_bytes);
+
+    for frame in frames {
+        let map = frame.buffer.map_readable();
+        let frame_data = map.unwrap();
+
+        let adts_header = make_adts_header(&aac_config, frame_data.size());
+
+        adts.extend(&adts_header);
+
+        adts.extend(frame_data.as_slice());
+    }
+
+    assert_eq!(payload_bytes, adts.len());
+
+    //println!("ADTS: {:02x?}", adts);
+
+    adts
+}
+
 #[derive(Debug)]
 enum PesCounterPadding {
     PesWithCounterPadding(usize),
@@ -302,19 +344,11 @@ use PesCounterPadding::*;
 // written so far), so this would typically be set for the last PES in a chunk.
 fn write_pes(
     buf: &mut Vec<u8>,
-    aac_config: &AacConfig,
     frames: &[EncodedFrame],
     continuity_counter: &mut u8,
     counter_padding: PesCounterPadding,
 ) -> usize {
     let gst_pts = frames[0].pts.unwrap();
-
-    // Keep it simple and readable for now, can optimise it later if needed
-    let payload_bytes = frames
-        .iter()
-        .fold(0, |sum, frame| sum + ADTS_HEADER_LEN + frame.buffer.size());
-
-    let mut adts = Vec::<u8>::with_capacity(payload_bytes);
 
     /*
     // Dump frame sizes so we can easily make unit tests from the output
@@ -328,22 +362,9 @@ fn write_pes(
     );
     */
 
-    for frame in frames {
-        let map = frame.buffer.map_readable();
-        let frame_data = map.unwrap();
+    let adts = write_aac_frames(&frames);
 
-        let adts_header = make_adts_header(aac_config, frame_data.size());
-
-        adts.extend(&adts_header);
-
-        adts.extend(frame_data.as_slice());
-    }
-
-    assert_eq!(payload_bytes, adts.len());
-
-    //println!("ADTS: {:02x?}", adts);
-
-    let n_packets = (PES_HEADER_LEN + payload_bytes + 183) / 184;
+    let n_packets = (PES_HEADER_LEN + adts.len() + 183) / 184;
 
     let n_extra_packets =
         if let PesCounterPadding::PesWithCounterPadding(n_written) = counter_padding {
@@ -558,21 +579,6 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
     let n_frames = frames.len();
     //println!("{}", n_frames);
 
-    let frame_format = &frames[0].format;
-
-    let adts_hdr_sample_rate = match frame_format {
-        EncodedFrameFormat::AacLc => 48000,
-        EncodedFrameFormat::AacLcSbrExt => 24000,
-        _ => unimplemented!("frame format {frame_format:?}"),
-    };
-
-    let aac_config = AacConfig {
-        mpeg_version: 4,
-        rate: adts_hdr_sample_rate,
-        channels: 2,
-        aot: AAC_AOT_LC,
-    };
-
     let mut aac_continuity_counter: u8 = 0;
     let mut aac_packets_written = 0; // TODO: could calculate from (chunk.len()/188)-2
 
@@ -585,7 +591,6 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
         if !is_last {
             aac_packets_written += write_pes(
                 &mut chunk,
-                &aac_config,
                 frame,
                 &mut aac_continuity_counter,
                 PesNoCounterPadding,
@@ -593,7 +598,6 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
         } else {
             aac_packets_written += write_pes(
                 &mut chunk,
-                &aac_config,
                 frame,
                 &mut aac_continuity_counter,
                 PesWithCounterPadding(aac_packets_written),
