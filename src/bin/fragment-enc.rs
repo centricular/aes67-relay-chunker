@@ -319,7 +319,7 @@ for reproducibility",
             // but the profile name string might still change in future versions
             // before it gets merged into main.
             let encoder_caps = gst::Caps::builder("audio/mpeg")
-                .field("profile", "sbr")
+                .field("profile", "he-aac-v1")
                 .build();
 
             (aacenc, Some(encoder_caps))
@@ -411,7 +411,7 @@ for reproducibility",
                         let base_profile = s.get::<&str>("base-profile").unwrap_or(profile);
                         match profile {
                             "lc" => EncodedFrameFormat::AacLc,
-                            "sbr" if base_profile == "lc" => EncodedFrameFormat::AacLcSbrExt,
+                            "he-aac-v1" if base_profile == "lc" => EncodedFrameFormat::AacLcSbrExt,
                             _ => unimplemented!("Profile {profile} with base profile {base_profile} not yet supported!"),
                         }
                     }
