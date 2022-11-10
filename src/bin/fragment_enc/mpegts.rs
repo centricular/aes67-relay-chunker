@@ -155,7 +155,7 @@ pub fn write_pat(buf: &mut Vec<u8>, continuity_counter: u8) {
   FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 00 02
   B0 12 00 01 C1 00 00 E0 41 F0 00 0F E0 41 F0 00 0A 44 05 C7
 */
-pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8) {
+pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8, stream_type: u8) {
     let mut pmt = Vec::with_capacity(188);
 
     // header
@@ -210,7 +210,8 @@ pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8) {
 
     // Streams [
     //   0x0F - stream_type="ISO/IEC 13818-7 Audio with ADTS transport syntax"
-    pmt.push(0x0f);
+    //   0x11 - ISO/IEC 14496-3 Audio with the LATM transport syntax as defined in ISO/IEC 14496-3
+    pmt.push(stream_type);
 
     //   0xE0 41 - 0b111 reserved + elementary_PID=65/0x41
     pmt.extend((0b111_0000000000000u16 | 0x41u16).to_be_bytes());
@@ -694,6 +695,9 @@ const FRAMES_PER_PES: usize = 5;
 
 const CONTINUITY_COUNTER_ROUNDS: usize = 16;
 
+const TS_PMT_STREAM_TYPE_ADTS: u8 = 0xF;
+const TS_PMT_STREAM_TYPE_LATM: u8 = 0x11;
+
 pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
     let payload_capacity = (2 * 188)
         + (15 * 188)
@@ -703,10 +707,16 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
 
     let mut chunk = Vec::<u8>::with_capacity(payload_capacity);
 
+    let pmt_stream_type = match frames[0].format {
+        AacLc | AacLcSbrExt => TS_PMT_STREAM_TYPE_ADTS,
+        AacLcSbrPs => TS_PMT_STREAM_TYPE_LATM,
+        _ => unimplemented!(),
+    };
+
     // We write one PAT + PMT per chunk, so counter increases by one per chunk
     let pat_pmt_continuity_counter = (chunk_num % 16) as u8;
     write_pat(&mut chunk, pat_pmt_continuity_counter);
-    write_pmt(&mut chunk, pat_pmt_continuity_counter);
+    write_pmt(&mut chunk, pat_pmt_continuity_counter, pmt_stream_type);
 
     let n_frames = frames.len();
     //println!("{}", n_frames);
