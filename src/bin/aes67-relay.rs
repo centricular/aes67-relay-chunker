@@ -164,7 +164,10 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
 }
 
 fn create_null_output() -> gst::Element {
-    gst::ElementFactory::make("fakesink").build().unwrap()
+    gst::ElementFactory::make("fakesink")
+        .property("sync", false)
+        .build()
+        .unwrap()
 }
 
 // wait-for-connection=false means we will consume buffers and drop them
@@ -181,11 +184,13 @@ fn create_null_output() -> gst::Element {
 fn create_srt_output(srt_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, srt_url.as_str(), None).unwrap();
     sink.set_property("wait-for-connection", false);
+    sink.set_property("sync", false);
     sink
 }
 
 fn create_udp_output(udp_url: Url) -> gst::Element {
     let sink = gst::Element::make_from_uri(gst::URIType::Sink, udp_url.as_str(), None).unwrap();
+    sink.set_property("sync", false);
     sink
 }
 
