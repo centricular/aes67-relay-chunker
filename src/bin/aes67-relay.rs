@@ -266,7 +266,7 @@ fn main() {
                 .short('d')
                 .long("drop-probability")
                 .help("Drop probability in packets per million")
-                .takes_value(true),
+                .num_args(1),
         )
         .after_help(
             "Receive an AES67 audio stream, repacketise it with embedded PTP timestamps
@@ -274,9 +274,9 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         )
         .get_matches();
 
-    let silent = matches.is_present("silent");
+    let silent = matches.contains_id("silent");
 
-    let input_uri = matches.value_of("input-uri").unwrap();
+    let input_uri = matches.get_one::<&str>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
         .map_err(|err| {
@@ -287,7 +287,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         })
         .unwrap();
 
-    let output_uri = matches.value_of("output-uri").unwrap();
+    let output_uri = matches.get_one::<&str>("output-uri").unwrap();
 
     let output_url = url::Url::parse(output_uri)
         .map_err(|err| {
@@ -321,9 +321,8 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     // For simulating packet drops (not very sophisticated, maybe netsim would be better?)
     let id = gst::ElementFactory::make("identity").build().unwrap();
-    if matches.is_present("drop-probability") {
-        let p_drop_ppm: u32 = matches.value_of_t("drop-probability").unwrap();
-        let p: f32 = p_drop_ppm as f32 / 1_000_000.0f32;
+    if let Some(p_drop_ppm) = matches.get_one::<u32>("drop-probability") {
+        let p: f32 = *p_drop_ppm as f32 / 1_000_000.0f32;
         println!("Configuring packet drop probability to {}!", p);
         id.set_property("drop-probability", p);
     }

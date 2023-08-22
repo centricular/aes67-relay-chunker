@@ -190,7 +190,7 @@ fn main() {
                 .short('e')
                 .long("encoding")
                 .help("Encoding (and muxing) of assembled audio chunks")
-                .possible_values(["ts-aac-fdk", "ts-heaacv1-fdk", "ts-heaacv2-fdk", "ts-aac-vo", "aac-fdk", "heaacv1-fdk", "heaacv2-fdk", "aac-vo", "flac", "none"])
+                .value_parser(["ts-aac-fdk", "ts-heaacv1-fdk", "ts-heaacv2-fdk", "ts-aac-vo", "aac-fdk", "heaacv1-fdk", "heaacv2-fdk", "aac-vo", "flac", "none"])
                 .default_value("flac"),
         )
         .arg(
@@ -198,7 +198,7 @@ fn main() {
                 .short('b')
                 .long("bitrate")
                 .help("Bitrate of encoded audio for lossy formats, in bits per second")
-                .takes_value(true)
+                .num_args(1)
                 .value_name("BITRATE")
         )
         .arg(
@@ -212,7 +212,7 @@ fn main() {
             Arg::new("output-pattern")
                 .short('o')
                 .long("output-pattern")
-                .takes_value(true)
+                .num_args(1)
                 .value_name("FILENAME-PATTERN")
                 .help("File path pattern for chunks, must contain '{num}' placeholder for chunk number, e.g. '/tmp/p1-audio-aac-{num}.ts'")
         )
@@ -223,7 +223,7 @@ for reproducibility",
         )
         .get_matches();
 
-    let input_uri = matches.value_of("input-uri").unwrap();
+    let input_uri = matches.get_one::<&str>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
         .or_else(|err| {
@@ -280,7 +280,7 @@ for reproducibility",
     depayloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
     let chunker = gst::ElementFactory::make("x-audiochunker").build().unwrap();
-    let frames_per_chunk: u32 = matches.value_of_t("frames-per-chunk").unwrap();
+    let frames_per_chunk = *matches.get_one::<u32>("frames-per-chunk").unwrap();
     chunker.set_property("frames-per-chunk", frames_per_chunk);
 
     if frames_per_chunk % 3 != 0 {
@@ -298,7 +298,7 @@ for reproducibility",
     // mp3/aac encoder that will do way worse things to the audio anyway.
     conv.set_property_from_str("dithering", "none");
 
-    let encoding = matches.value_of("encoding").unwrap();
+    let encoding = *matches.get_one::<&str>("encoding").unwrap();
 
     let (enc, enc_caps) = match encoding {
         "aac-fdk" | "ts-aac-fdk" => {
@@ -365,7 +365,7 @@ for reproducibility",
     };
 
     if encoding.contains("aac") {
-        if let Ok(bitrate) = matches.value_of_t::<i32>("bitrate") {
+        if let Some(bitrate) = matches.get_one::<i32>("bitrate") {
             enc.set_property("bitrate", bitrate);
         }
     }
@@ -391,8 +391,10 @@ for reproducibility",
         pipeline.set_base_time(gst::ClockTime::ZERO);
     }
 
-    let output_pattern = matches.value_of("output-pattern").map(|s| s.to_string());
-    if let Some(opattern) = &output_pattern {
+    let output_pattern = matches
+        .get_one::<&str>("output-pattern")
+        .map(|s| s.to_string());
+    if let Some(ref opattern) = output_pattern {
         if opattern.find("{num}").is_none() {
             eprintln!("Provided filename output pattern does not contain '{{num}}'!");
             return;
