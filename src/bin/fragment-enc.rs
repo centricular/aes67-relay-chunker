@@ -44,7 +44,7 @@ struct ChunkCollector {
 }
 
 fn create_srt_input(srt_url: &Url) -> gst::Element {
-    let bin = gst::Bin::new(Some("srt-source"));
+    let bin = gst::Bin::builder().name("srt-source").build();
 
     let src = gst::Element::make_from_uri(gst::URIType::Src, srt_url.as_str(), None).unwrap();
     //src.set_property("latency", 125);
@@ -68,7 +68,7 @@ fn create_srt_input(srt_url: &Url) -> gst::Element {
 
     gst::Element::link_many(&[&src, &capsfilter]).unwrap();
 
-    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+    let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
         .upcast::<gst::Pad>();
 
@@ -78,7 +78,7 @@ fn create_srt_input(srt_url: &Url) -> gst::Element {
 }
 
 fn create_udp_input(udp_url: &Url) -> gst::Element {
-    let bin = gst::Bin::new(Some("udp-source"));
+    let bin = gst::Bin::builder().name("udp-source").build();
 
     let src = gst::Element::make_from_uri(gst::URIType::Src, udp_url.as_str(), None).unwrap();
 
@@ -98,7 +98,7 @@ fn create_udp_input(udp_url: &Url) -> gst::Element {
 
     gst::Element::link_many(&[&src]).unwrap();
 
-    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+    let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
         .upcast::<gst::Pad>();
 
@@ -109,7 +109,7 @@ fn create_udp_input(udp_url: &Url) -> gst::Element {
 
 // Not sure what the point of this test input is
 fn create_test_input() -> gst::Element {
-    let bin = gst::Bin::new(Some("test-source"));
+    let bin = gst::Bin::builder().name("test-source").build();
 
     let src = gst::ElementFactory::make("audiotestsrc").build().unwrap();
     src.set_property("is-live", true);
@@ -165,7 +165,7 @@ fn create_test_input() -> gst::Element {
 
     let src_pad = payloader.static_pad("src").unwrap();
 
-    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+    let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
         .upcast::<gst::Pad>();
 
@@ -256,7 +256,7 @@ for reproducibility",
     // Pipeline
     let main_loop = glib::MainLoop::new(None, false);
 
-    let pipeline = gst::Pipeline::new(None);
+    let pipeline = gst::Pipeline::new();
 
     let source = match input_url.scheme() {
         "test" => create_test_input(),
@@ -424,7 +424,7 @@ for reproducibility",
                 );
 
                 let s = sample.caps().unwrap().structure(0).unwrap();
-                let frame_format = match s.name() {
+                let frame_format = match s.name().as_str() {
                     "audio/mpeg" => {
                         let profile = s.get::<&str>("profile").unwrap();
                         let base_profile = s.get::<&str>("base-profile").unwrap_or(profile);
@@ -458,7 +458,7 @@ for reproducibility",
                 match ev.view() {
                     EventView::CustomDownstream(ev_custom) => {
                         let s = ev_custom.structure().unwrap();
-                        match s.name() {
+                        match s.name().as_str() {
                             "chunk-start" => collector.frames.clear(),
                             "chunk-end" => {
                                 let continuity_counter =
@@ -581,31 +581,32 @@ for reproducibility",
 
     let main_loop_clone = main_loop.clone();
 
-    bus.add_watch(move |_, msg| {
-        use gst::MessageView;
+    let _watch = bus
+        .add_watch(move |_, msg| {
+            use gst::MessageView;
 
-        let main_loop = &main_loop_clone;
+            let main_loop = &main_loop_clone;
 
-        match msg.view() {
-            MessageView::Eos(..) => {
-                println!("EOS. Probably means srt sender went away.");
-                main_loop.quit();
-            }
-            MessageView::Error(err) => {
-                println!(
-                    "Error from {:?}: {} ({:?})",
-                    err.src().map(|s| s.path_string()),
-                    err.error(),
-                    err.debug()
-                );
-                main_loop.quit();
-            }
-            _ => (),
-        };
+            match msg.view() {
+                MessageView::Eos(..) => {
+                    println!("EOS. Probably means srt sender went away.");
+                    main_loop.quit();
+                }
+                MessageView::Error(err) => {
+                    println!(
+                        "Error from {:?}: {} ({:?})",
+                        err.src().map(|s| s.path_string()),
+                        err.error(),
+                        err.debug()
+                    );
+                    main_loop.quit();
+                }
+                _ => (),
+            };
 
-        glib::Continue(true)
-    })
-    .expect("Failed to add bus watch");
+            glib::ControlFlow::Continue
+        })
+        .expect("Failed to add bus watch");
 
     loop {
         // Any errors will be picked up via the bus handler
@@ -625,5 +626,5 @@ for reproducibility",
         println!("Restarting pipeline...");
     }
 
-    // bus.remove_watch().unwrap();
+    // drop(watch);
 }

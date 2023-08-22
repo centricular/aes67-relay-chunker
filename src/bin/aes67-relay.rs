@@ -54,7 +54,7 @@ fn create_test_input() -> gst::Element {
 
 // We only support L24 audio for now, and assume PTP clocking is signalled (KISS)
 fn create_sdp_input(sdp_url: &Url) -> gst::Element {
-    let bin = gst::Bin::new(Some("sdp-source"));
+    let bin = gst::Bin::builder().name("sdp-source").build();
 
     let sdpsrc = gst::ElementFactory::make("sdpsrc").build().unwrap();
     sdpsrc.set_property("location", sdp_url.as_str());
@@ -106,7 +106,7 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
 
     bin.add_many(&[&sdpsrc, &depayload]).unwrap();
 
-    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+    let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
         .upcast::<gst::Pad>();
 
@@ -126,7 +126,7 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
 
 // We only support RTSP with L24 audio for now (KISS)
 fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
-    let bin = gst::Bin::new(Some("rtsp-source"));
+    let bin = gst::Bin::builder().name("rtsp-source").build();
 
     // Requires:
     // - https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955
@@ -145,7 +145,7 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
 
     bin.add_many(&[&rtspsrc, &depayload]).unwrap();
 
-    let ghostpad = gst::GhostPad::with_target(Some("src"), &src_pad)
+    let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
         .upcast::<gst::Pad>();
 
@@ -310,7 +310,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     // Pipeline
     let main_loop = glib::MainLoop::new(None, false);
 
-    let pipeline = gst::Pipeline::new(None);
+    let pipeline = gst::Pipeline::new();
 
     let source = match input_url.scheme() {
         "rtsp" => create_rtsp_input(&input_url),
@@ -487,64 +487,65 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     let pipeline_buswatch = pipeline.clone();
 
-    bus.add_watch(move |_, msg| {
-        use gst::MessageView;
+    let watch = bus
+        .add_watch(move |_, msg| {
+            use gst::MessageView;
 
-        let main_loop = &main_loop_clone;
+            let main_loop = &main_loop_clone;
 
-        match msg.view() {
-            MessageView::Eos(..) => main_loop.quit(),
-            MessageView::Application(app_msg) => {
-                let s = app_msg.structure().unwrap();
-                if s.name() == "jitterbuffer" {
-                    let jb = s.get::<gst::Element>("jitterbuffer").unwrap();
+            match msg.view() {
+                MessageView::Eos(..) => main_loop.quit(),
+                MessageView::Application(app_msg) => {
+                    let s = app_msg.structure().unwrap();
+                    if s.name() == "jitterbuffer" {
+                        let jb = s.get::<gst::Element>("jitterbuffer").unwrap();
 
-                    let mut ctx = ctx_buswatch.lock().unwrap();
-                    ctx.jb.replace(jb);
+                        let mut ctx = ctx_buswatch.lock().unwrap();
+                        ctx.jb.replace(jb);
+                    }
                 }
-            }
-            MessageView::AsyncDone(..) => {
-                gst::debug_bin_to_dot_file_with_ts(
-                    &pipeline_buswatch,
-                    gst::DebugGraphDetails::all(),
-                    &"aes67-relay.async-done",
-                );
-            }
-            MessageView::Error(err) => {
-                println!(
-                    "Error from {:?}: {} ({:?})",
-                    err.src().map(|s| s.path_string()),
-                    err.error(),
-                    err.debug()
-                );
-                gst::debug_bin_to_dot_file_with_ts(
-                    &pipeline_buswatch,
-                    gst::DebugGraphDetails::all(),
-                    &"aes67-relay.error",
-                );
-                main_loop.quit();
-            }
-            MessageView::Element(..) => {
-                println!("Element message: {}", msg.structure().unwrap());
-            }
-            _ => (),
-        };
+                MessageView::AsyncDone(..) => {
+                    gst::debug_bin_to_dot_file_with_ts(
+                        &pipeline_buswatch,
+                        gst::DebugGraphDetails::all(),
+                        &"aes67-relay.async-done",
+                    );
+                }
+                MessageView::Error(err) => {
+                    println!(
+                        "Error from {:?}: {} ({:?})",
+                        err.src().map(|s| s.path_string()),
+                        err.error(),
+                        err.debug()
+                    );
+                    gst::debug_bin_to_dot_file_with_ts(
+                        &pipeline_buswatch,
+                        gst::DebugGraphDetails::all(),
+                        &"aes67-relay.error",
+                    );
+                    main_loop.quit();
+                }
+                MessageView::Element(..) => {
+                    println!("Element message: {}", msg.structure().unwrap());
+                }
+                _ => (),
+            };
 
-        glib::Continue(true)
-    })
-    .expect("Failed to add bus watch");
+            glib::ControlFlow::Continue
+        })
+        .expect("Failed to add bus watch");
 
     // timeout
     glib::source::timeout_add(Duration::from_millis(1000), move || {
         let ctx = ctx.lock().unwrap();
 
         if silent || ctx.jb.is_none() {
-            return glib::Continue(true);
+            return glib::ControlFlow::Continue;
         }
 
         if ctx.clock_sync != ClockSync::Synchronised {
             println!("Waiting for PTP clock sync..");
-            return glib::Continue(true);
+            return glib::ControlFlow::Continue;
         }
 
         let now = gst::util_get_timestamp();
@@ -589,7 +590,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
             eprintln!("Warning: output not sending data fast enough! Backlog: {backlog:.1}s {dropping_msg}");
         }
 
-        glib::Continue(true)
+        glib::ControlFlow::Continue
     });
 
     main_loop.run();
@@ -598,5 +599,5 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         .set_state(gst::State::Null)
         .expect("Failed to shut down the pipeline");
 
-    bus.remove_watch().unwrap();
+    drop(watch);
 }

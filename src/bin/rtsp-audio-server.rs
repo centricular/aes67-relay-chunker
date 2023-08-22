@@ -47,7 +47,7 @@ fn main_loop() -> Result<(), Error> {
     // Set RFC7273 mode, publish clock and offset
     factory.set_publish_clock_mode(RTSPPublishClockMode::ClockAndOffset);
 
-    mounts.add_factory("/audio", &factory);
+    mounts.add_factory("/audio", factory);
 
     // Attach the server to the default main context
     let id = server.attach(None)?;
