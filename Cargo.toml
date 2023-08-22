@@ -16,39 +16,39 @@ url = "2.2.2"
 bitstream-io = "1.5.0"
 
 [dependencies.glib]
-git = "https://github.com/gtk-rs/gtk-rs-core"
+version = "0.16"
 
 [dependencies.gst]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer"
+version = "0.19"
 
 [dependencies.gst-app]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-app"
+version = "0.19"
 
 [dependencies.gst-audio]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-audio"
+version = "0.19"
 
 [dependencies.gst-base]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-base"
+version = "0.19"
 
 [dependencies.gst-net]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-net"
+version = "0.19"
 
 [dependencies.gst-rtp]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-rtp"
+version = "0.19"
 
 [dependencies.gst-rtsp-server]
 features = ["v1_20"]
-git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 package = "gstreamer-rtsp-server"
+version = "0.19"
