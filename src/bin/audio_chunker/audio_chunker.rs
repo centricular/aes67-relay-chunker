@@ -86,7 +86,7 @@ impl ObjectSubclass for AudioChunker {
 
     fn with_class(klass: &Self::Class) -> Self {
         let templ = klass.pad_template("sink").unwrap();
-        let sinkpad = gst::Pad::builder_with_template(&templ, Some("sink"))
+        let sinkpad = gst::Pad::builder_from_template(&templ)
             .chain_function(|pad, parent, buffer| {
                 Self::catch_panic_pad_function(
                     parent,
@@ -101,7 +101,7 @@ impl ObjectSubclass for AudioChunker {
             .build();
 
         let templ = klass.pad_template("src").unwrap();
-        let srcpad = gst::Pad::builder_with_template(&templ, Some("src"))
+        let srcpad = gst::Pad::builder_from_template(&templ)
             .query_function(|pad, parent, query| {
                 Self::catch_panic_pad_function(parent, || false, |this| this.src_query(pad, query))
             })
@@ -121,31 +121,27 @@ impl ObjectImpl for AudioChunker {
     fn constructed(&self) {
         self.parent_constructed();
 
-        self.instance().add_pad(&self.sinkpad).unwrap();
-        self.instance().add_pad(&self.srcpad).unwrap();
+        self.obj().add_pad(&self.sinkpad).unwrap();
+        self.obj().add_pad(&self.srcpad).unwrap();
     }
 
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpecUInt::new(
-                    "frames-per-chunk",
-                    "Frames per chunk",
-                    "How many audio frames should be grouped into a single chunk",
-                    1,
-                    u32::MAX,
-                    DEFAULT_FRAMES_PER_CHUNK,
-                    glib::ParamFlags::READWRITE,
-                ),
-                glib::ParamSpecUInt::new(
-                    "samples-per-frame",
-                    "Samples per Frame",
-                    "Audio samples in a codec frame",
-                    1,
-                    u32::MAX,
-                    DEFAULT_SAMPLES_PER_FRAME,
-                    glib::ParamFlags::READWRITE,
-                ),
+                glib::ParamSpecUInt::builder("frames-per-chunk")
+                    .nick("Frames per chunk")
+                    .blurb("How many audio frames should be grouped into a single chunk")
+                    .minimum(1)
+                    .maximum(u32::MAX)
+                    .default_value(DEFAULT_FRAMES_PER_CHUNK)
+                    .build(),
+                glib::ParamSpecUInt::builder("samples-per-frame")
+                    .nick("Samples per Frame")
+                    .blurb("Audio samples in a codec frame")
+                    .minimum(1)
+                    .maximum(u32::MAX)
+                    .default_value(DEFAULT_SAMPLES_PER_FRAME)
+                    .build(),
             ]
         });
 
@@ -487,7 +483,6 @@ impl AudioChunker {
             outbuf_ref.set_dts(None);
 
             // Drop state lock before we push out events/buffers
-            drop(state);
             drop(state_guard);
 
             // Push some serialised custom events before/after each chunk,
@@ -585,7 +580,7 @@ impl AudioChunker {
             _ => (),
         }
 
-        gst::Pad::event_default(pad, Some(&*self.instance()), event)
+        gst::Pad::event_default(pad, Some(&*self.obj()), event)
     }
 
     #[allow(clippy::single_match)]
@@ -628,7 +623,7 @@ impl AudioChunker {
                     false
                 }
             }
-            _ => gst::Pad::query_default(pad, Some(&*self.instance()), query),
+            _ => gst::Pad::query_default(pad, Some(&*self.obj()), query),
         }
     }
 }
