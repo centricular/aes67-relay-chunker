@@ -104,7 +104,7 @@ fn create_sdp_input(sdp_url: &Url) -> gst::Element {
 
     let src_pad = depayload.static_pad("src").unwrap();
 
-    bin.add_many(&[&sdpsrc, &depayload]).unwrap();
+    bin.add_many([&sdpsrc, &depayload]).unwrap();
 
     let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
@@ -143,7 +143,7 @@ fn create_rtsp_input(rtsp_url: &Url) -> gst::Element {
 
     let src_pad = depayload.static_pad("src").unwrap();
 
-    bin.add_many(&[&rtspsrc, &depayload]).unwrap();
+    bin.add_many([&rtspsrc, &depayload]).unwrap();
 
     let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
@@ -279,20 +279,18 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     let input_uri = matches.get_one::<&str>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
-        .map_err(|err| {
+        .inspect_err(|_err| {
             eprintln!(
                 "Please provide a valid input URI, e.g. sdp:///path/to/foo.sdp or rtsp://127.0.0.1:8554/audio or test://"
             );
-            err
         })
         .unwrap();
 
     let output_uri = matches.get_one::<&str>("output-uri").unwrap();
 
     let output_url = url::Url::parse(output_uri)
-        .map_err(|err| {
+        .inspect_err(|_err| {
             eprintln!("Please provide a valid output URI, e.g. srt://127.0.0.1:7001?passphrase=longpassword or null://");
-            err
         })
         .unwrap();
 
@@ -355,7 +353,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     // Convert to an absolute sample offset
                     let abs_off = abs_ts
                         .nseconds()
-                        .mul_div_floor(sample_rate as u64, *gst::ClockTime::SECOND)
+                        .mul_div_floor(sample_rate, *gst::ClockTime::SECOND)
                         .unwrap();
 
                     // Filter the first buffer in each second
@@ -467,10 +465,10 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     sink.set_property("sync", input_url.scheme() == "test");
 
     pipeline
-        .add_many(&[&source, &id, &conv, &payloader, &sink_queue, &sink])
+        .add_many([&source, &id, &conv, &payloader, &sink_queue, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&source, &id, &conv, &payloader, &sink_queue, &sink]).unwrap();
+    gst::Element::link_many([&source, &id, &conv, &payloader, &sink_queue, &sink]).unwrap();
 
     pipeline.set_start_time(gst::ClockTime::NONE);
     pipeline.set_base_time(gst::ClockTime::ZERO);
@@ -506,7 +504,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                 MessageView::AsyncDone(..) => {
                     pipeline_buswatch.debug_to_dot_file_with_ts(
                         gst::DebugGraphDetails::all(),
-                        &"aes67-relay.async-done",
+                        "aes67-relay.async-done",
                     );
                 }
                 MessageView::Error(err) => {
@@ -518,7 +516,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     );
                     pipeline_buswatch.debug_to_dot_file_with_ts(
                         gst::DebugGraphDetails::all(),
-                        &"aes67-relay.error",
+                        "aes67-relay.error",
                     );
                     main_loop.quit();
                 }
