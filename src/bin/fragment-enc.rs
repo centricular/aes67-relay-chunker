@@ -64,9 +64,9 @@ fn create_srt_input(srt_url: &Url) -> gst::Element {
 
     let src_pad = capsfilter.static_pad("src").unwrap();
 
-    bin.add_many(&[&src, &capsfilter]).unwrap();
+    bin.add_many([&src, &capsfilter]).unwrap();
 
-    gst::Element::link_many(&[&src, &capsfilter]).unwrap();
+    gst::Element::link_many([&src, &capsfilter]).unwrap();
 
     let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
@@ -94,9 +94,9 @@ fn create_udp_input(udp_url: &Url) -> gst::Element {
 
     let src_pad = src.static_pad("src").unwrap();
 
-    bin.add_many(&[&src]).unwrap();
+    bin.add_many([&src]).unwrap();
 
-    gst::Element::link_many(&[&src]).unwrap();
+    gst::Element::link_many([&src]).unwrap();
 
     let ghostpad = gst::GhostPad::with_target(&src_pad)
         .unwrap()
@@ -159,9 +159,9 @@ fn create_test_input() -> gst::Element {
 
     payloader.emit_by_name::<()>("add-extension", &[&hdr_ext]);
 
-    bin.add_many(&[&src, &capsfilter, &payloader]).unwrap();
+    bin.add_many([&src, &capsfilter, &payloader]).unwrap();
 
-    gst::Element::link_many(&[&src, &capsfilter, &payloader]).unwrap();
+    gst::Element::link_many([&src, &capsfilter, &payloader]).unwrap();
 
     let src_pad = payloader.static_pad("src").unwrap();
 
@@ -226,11 +226,10 @@ for reproducibility",
     let input_uri = matches.get_one::<&str>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
-        .or_else(|err| {
+        .inspect_err(|_err| {
             eprintln!(
                 "Please provide a valid input URI, e.g. srt://0.0.0.0:7001?mode=listener&passphrase=longpassword or udp://0.0.0.0:8001 or test://"
             );
-            return Err(err);
         })
         .unwrap();
 
@@ -381,10 +380,10 @@ for reproducibility",
     }
 
     pipeline
-        .add_many(&[&source, &depayloader, &chunker, &conv, &enc, &sink])
+        .add_many([&source, &depayloader, &chunker, &conv, &enc, &sink])
         .unwrap();
 
-    gst::Element::link_many(&[&source, &depayloader, &chunker, &conv, &enc, &sink]).unwrap();
+    gst::Element::link_many([&source, &depayloader, &chunker, &conv, &enc, &sink]).unwrap();
 
     if input_url.scheme() == "test" {
         pipeline.set_start_time(gst::ClockTime::NONE);
@@ -395,7 +394,7 @@ for reproducibility",
         .get_one::<&str>("output-pattern")
         .map(|s| s.to_string());
     if let Some(ref opattern) = output_pattern {
-        if opattern.find("{num}").is_none() {
+        if !opattern.contains("{num}") {
             eprintln!("Provided filename output pattern does not contain '{{num}}'!");
             return;
         }
@@ -612,7 +611,7 @@ for reproducibility",
 
     loop {
         // Any errors will be picked up via the bus handler
-        if let Err(_) = pipeline.set_state(gst::State::Playing) {};
+        if pipeline.set_state(gst::State::Playing).is_err() {};
 
         main_loop.run();
 
