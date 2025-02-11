@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+#[allow(clippy::module_inception)]
 mod audio_chunker;
 
 use gst::glib;

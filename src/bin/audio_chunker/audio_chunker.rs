@@ -178,7 +178,7 @@ impl ElementImpl for AudioChunker {
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
             gst::subclass::ElementMetadata::new(
                 "Audio Chunker",
-                &gst_rtp::RTP_HDREXT_ELEMENT_CLASS,
+                gst_rtp::RTP_HDREXT_ELEMENT_CLASS,
                 "Chunks raw audio based on absolute timestamps",
                 "Tim-Philipp Müller <tim@centricular.com>",
             )
@@ -198,7 +198,7 @@ impl ElementImpl for AudioChunker {
                     ]),
                 )
                 .field("rate", 48_000i32) // TODO: allow range
-                .field("channels", gst::IntRange::new(1, std::i32::MAX))
+                .field("channels", gst::IntRange::new(1, i32::MAX))
                 .field("layout", "interleaved")
                 .build();
 
