@@ -266,6 +266,7 @@ fn main() {
                 .short('d')
                 .long("drop-probability")
                 .help("Drop probability in packets per million")
+                .value_parser(clap::value_parser!(u32))
                 .num_args(1),
         )
         .after_help(
@@ -276,7 +277,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
 
     let silent = matches.contains_id("silent");
 
-    let input_uri = matches.get_one::<&str>("input-uri").unwrap();
+    let input_uri = matches.get_one::<String>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
         .inspect_err(|_err| {
@@ -286,7 +287,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
         })
         .unwrap();
 
-    let output_uri = matches.get_one::<&str>("output-uri").unwrap();
+    let output_uri = matches.get_one::<String>("output-uri").unwrap();
 
     let output_url = url::Url::parse(output_uri)
         .inspect_err(|_err| {
