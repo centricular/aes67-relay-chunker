@@ -338,11 +338,10 @@ In order to achieve our goal we
 
 ## Requirements
 
-- GStreamer >= 1.21.0.1 (`main` branch as of 1 July 2022 at time of writing), in particular:
-  - [sdpdemux: add media attribute to caps to fix ptp clock handling](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1924) (merged)
-  - [rtpjitterbuffer: Improve accuracy of RFC7273 clock time calculations](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1955) (merged)
-  - [rtpjitterbuffer: add "add-reference-timestamp-meta" property](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1964) (merged)
-  - [rtpjitterbuffer: Fix calculation of RFC7273 RTP time period start](https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/2655) (unmerged as of 1 July 2022)
+- GStreamer >= 1.24
+
+This is not a strict requirement, but a decent baseline that should have all
+required fixes.
 
 ## Build
 
@@ -352,10 +351,6 @@ and follow the instructions. Latest stable release is fine.
 Build with `cargo build` inside a GStreamer `main` branch development environment.
 
 The binaries can then be found in `target/debug/` or `target/release/` (if built with `--release`).
-
-Technically the build requirement is only GStreamer 1.20, so it would probably
-be possible to build everything against a GStreamer 1.20 system installation
-and then only run it from inside a GStreamer development environment.
 
 ## Preparation
 

@@ -68,7 +68,7 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
         &self,
         _input: &gst::BufferRef,
         _write_flags: RTPHeaderExtensionFlags,
-        output: &mut gst::BufferRef,
+        output: &gst::BufferRef,
         output_data: &mut [u8],
     ) -> Result<usize, gst::LoggableError> {
         assert!(output_data.len() >= 8);
@@ -81,7 +81,7 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
 
         gst::log!(
             CAT,
-            imp: self,
+            imp = self,
             "Writing timestamp {:?} duration {:?}",
             pts,
             output.duration()
@@ -116,7 +116,7 @@ impl RTPHeaderExtensionImpl for RTPHeaderExtPTP {
 
         gst::log!(
             CAT,
-            imp: self,
+            imp = self,
             "Read timestamp {:?} duration {:?}",
             pts,
             output.duration()

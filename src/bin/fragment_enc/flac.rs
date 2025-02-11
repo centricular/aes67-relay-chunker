@@ -112,8 +112,7 @@ pub fn make_flacenc() -> gst::Element {
                         BufferCopyFlags::FLAGS
                             | BufferCopyFlags::TIMESTAMPS
                             | BufferCopyFlags::META,
-                        0,
-                        None,
+                        0..,
                     )
                     .unwrap();
 

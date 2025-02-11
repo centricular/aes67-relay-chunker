@@ -23,7 +23,7 @@ use std::time::Duration;
 use url::Url;
 
 fn create_test_input() -> gst::Element {
-    let test_input = gst::parse_bin_from_description(
+    let test_input = gst::parse::bin_from_description(
         "audiotestsrc is-live=false samplesperbuffer=48 wave=pink-noise name=testsrc
         ! capsfilter caps=audio/x-raw,rate=48000,channels=2",
         true,
@@ -198,13 +198,13 @@ fn create_udp_output(udp_url: Url) -> gst::Element {
 struct JitterbufferStats {
     n_pushed: u64,
     n_lost: u64,
-    time: gst::ClockTime, // local system clock timestamp, gst::util_get_timestamp()
+    time: gst::ClockTime, // local system clock timestamp, gst::get_timestamp()
 }
 
 impl JitterbufferStats {
     fn from_structure(stats: &gst::Structure) -> Self {
         JitterbufferStats {
-            time: gst::util_get_timestamp(),
+            time: gst::get_timestamp(),
             n_lost: stats.get::<u64>("num-lost").unwrap(),
             n_pushed: stats.get::<u64>("num-pushed").unwrap(),
         }
@@ -232,7 +232,7 @@ impl Default for RelayCtx {
             stats: JitterbufferStats {
                 n_pushed: 0,
                 n_lost: 0,
-                time: gst::util_get_timestamp(),
+                time: gst::get_timestamp(),
             },
             clock_sync: ClockSync::None,
         }
@@ -302,7 +302,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
     gst::Element::register(
         None,
         "x-rtphdrextptp",
-        gst::Rank::None,
+        gst::Rank::NONE,
         rtp_hdr_ext::RTPHeaderExtPTP::static_type(),
     )
     .unwrap();
@@ -504,8 +504,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                     }
                 }
                 MessageView::AsyncDone(..) => {
-                    gst::debug_bin_to_dot_file_with_ts(
-                        &pipeline_buswatch,
+                    pipeline_buswatch.debug_to_dot_file_with_ts(
                         gst::DebugGraphDetails::all(),
                         &"aes67-relay.async-done",
                     );
@@ -517,8 +516,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
                         err.error(),
                         err.debug()
                     );
-                    gst::debug_bin_to_dot_file_with_ts(
-                        &pipeline_buswatch,
+                    pipeline_buswatch.debug_to_dot_file_with_ts(
                         gst::DebugGraphDetails::all(),
                         &"aes67-relay.error",
                     );
@@ -547,7 +545,7 @@ and send it to a cloud server via SRT or UDP for chunking + encoding.",
             return glib::ControlFlow::Continue;
         }
 
-        let now = gst::util_get_timestamp();
+        let now = gst::get_timestamp();
 
         if now.mseconds() - ctx.stats.time.mseconds() > 1000 {
             let jb = ctx.jb.as_ref().unwrap();

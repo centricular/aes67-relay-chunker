@@ -240,7 +240,7 @@ for reproducibility",
     gst::Element::register(
         None,
         "x-rtphdrextptp",
-        gst::Rank::None,
+        gst::Rank::NONE,
         rtp_hdr_ext::RTPHeaderExtPTP::static_type(),
     )
     .unwrap();
@@ -248,7 +248,7 @@ for reproducibility",
     gst::Element::register(
         None,
         "x-audiochunker",
-        gst::Rank::None,
+        gst::Rank::NONE,
         audio_chunker::AudioChunker::static_type(),
     )
     .unwrap();
@@ -420,7 +420,7 @@ for reproducibility",
 
                 gst::trace!(
                     CAT,
-                    obj: appsink.upcast_ref::<gst::Element>(),
+                    obj = appsink.upcast_ref::<gst::Element>(),
                     "{:?}",
                     buf,
                 );
@@ -540,7 +540,7 @@ for reproducibility",
 
                                 gst::info!(
                                     CAT,
-                                    obj: appsink.upcast_ref::<gst::Element>(),
+                                    obj = appsink.upcast_ref::<gst::Element>(),
                                     "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
                                     pts,
                                     digest,
