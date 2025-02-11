@@ -8,6 +8,9 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+// Bits in binary notation are grouped according to bitstream semantics
+#![allow(clippy::unusual_byte_groupings)]
+
 mod tests;
 
 use crate::EncodedFrameFormat::*;
@@ -49,9 +52,8 @@ fn pts_to_packed_pcr(pts: u64) -> u64 {
 
     assert!(pcr_base < 0x200000000); // 33 bits
     assert!(pcr_ext < 0x200); // 9 bits
-    let packed_pcr = (pcr_base << (6 + 9)) | 0b111111_000000000 | pcr_ext;
 
-    packed_pcr
+    (pcr_base << (6 + 9)) | 0b111111_000000000 | pcr_ext
 }
 
 /* Packet 0
@@ -81,7 +83,7 @@ pub fn write_pat(buf: &mut Vec<u8>, continuity_counter: u8) {
     pat.push(0x47);
 
     // 0x40 00 - transport_error_indicator=0, payload_unit_start_indicator=1, transport_priority=0, PID=0x0000
-    pat.extend((0b010_0000000000000u16 | 0x0000u16).to_be_bytes());
+    pat.extend(0b010_0000000000000u16.to_be_bytes());
 
     // 0x3x - scrambling='00', adaptation_field_control='11' [adaptation_field + payload], continuity_counter=x
     pat.push(0b0011_0000 | continuity_counter);
@@ -206,7 +208,7 @@ pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8, stream_type: u8) {
     pmt.extend((0b111_0000000000000u16 | 0x41u16).to_be_bytes());
 
     // 0xF0 00 - 0b1111 reserved bits + program_info_length=0
-    pmt.extend((0b1111_000000000000u16 | 0u16).to_be_bytes());
+    pmt.extend(0b1111_000000000000u16.to_be_bytes());
 
     // Streams [
     //   0x0F - stream_type="ISO/IEC 13818-7 Audio with ADTS transport syntax"
@@ -217,7 +219,7 @@ pub fn write_pmt(buf: &mut Vec<u8>, continuity_counter: u8, stream_type: u8) {
     pmt.extend((0b111_0000000000000u16 | 0x41u16).to_be_bytes());
 
     //   0xF0 00 - 0b1111 reserved bits + ES_info_length=0
-    pmt.extend((0b1111_000000000000u16 | 0u16).to_be_bytes());
+    pmt.extend(0b1111_000000000000u16.to_be_bytes());
     // ]
 
     // crc
@@ -456,13 +458,11 @@ fn write_latm_frames(frames: &[EncodedFrame]) -> Vec<u8> {
 
 // Returns ADTS or LATM framed AAC data
 fn write_aac_frames(frames: &[EncodedFrame]) -> Vec<u8> {
-    let aac_data = match frames[0].format {
-        AacLc | AacLcSbrExt => write_adts_frames(&frames),
-        AacLcSbrPs => write_latm_frames(&frames),
+    match frames[0].format {
+        AacLc | AacLcSbrExt => write_adts_frames(frames),
+        AacLcSbrPs => write_latm_frames(frames),
         _ => unimplemented!(),
-    };
-
-    aac_data
+    }
 }
 
 #[derive(Debug)]
@@ -495,7 +495,7 @@ fn write_pes(
     );
     */
 
-    let aac_data = write_aac_frames(&frames);
+    let aac_data = write_aac_frames(frames);
 
     let n_packets = (PES_HEADER_LEN + aac_data.len() + 183) / 184;
 
@@ -599,6 +599,7 @@ fn write_pes(
         pes.push(0x47);
 
         // 0x00 41 - transport_error_indicator=0, payload_unit_start_indicator=0, transport_priority=0, PID=0x0041/65
+        #[allow(clippy::identity_op)]
         pes.extend((0b000_0000000000000u16 | 0x0041u16).to_be_bytes());
 
         // scrambling='00', adaptation_field_control='01' [payload only], continuity_counter=0
@@ -619,7 +620,7 @@ fn write_pes(
     // at all (ie. remaining payload is 184 bytes) because we make extra sure
     // in the previous loop that we have enough bytes left to distribute over
     // the number of packets we have to write out (the +1 in n_extra_packets+1).
-    while payload.len() > 0 {
+    while !payload.is_empty() {
         let packets_written = pes.len() / 188;
         let packets_left_to_write = n_total_packets - packets_written;
 
@@ -634,6 +635,7 @@ fn write_pes(
         pes.push(0x47);
 
         // 0x00 41 - transport_error_indicator=0, payload_unit_start_indicator=0, transport_priority=0, PID=0x0041/65
+        #[allow(clippy::identity_op)]
         pes.extend((0b000_0000000000000u16 | 0x0041u16).to_be_bytes());
 
         match packet_payload_len {
@@ -698,7 +700,7 @@ const CONTINUITY_COUNTER_ROUNDS: usize = 16;
 const TS_PMT_STREAM_TYPE_ADTS: u8 = 0xF;
 const TS_PMT_STREAM_TYPE_LATM: u8 = 0x11;
 
-pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
+pub fn write_ts_chunk(frames: &[EncodedFrame], chunk_num: u64) -> Vec<u8> {
     let payload_capacity = (2 * 188)
         + (15 * 188)
         + frames
@@ -724,7 +726,7 @@ pub fn write_ts_chunk(frames: &Vec<EncodedFrame>, chunk_num: u64) -> Vec<u8> {
     let mut aac_continuity_counter: u8 = 0;
     let mut aac_packets_written = 0; // TODO: could calculate from (chunk.len()/188)-2
 
-    let n_pes = (n_frames + FRAMES_PER_PES - 1) / FRAMES_PER_PES;
+    let n_pes = n_frames.div_ceil(FRAMES_PER_PES);
 
     // TODO: write that nicer by using iterators directly
     for (i, frame) in frames.chunks(FRAMES_PER_PES).enumerate() {
