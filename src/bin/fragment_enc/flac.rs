@@ -49,7 +49,7 @@ pub fn make_flacenc() -> gst::Element {
                     .mul_div_floor(sample_rate as u64, *gst::ClockTime::SECOND)
                     .unwrap();
 
-                let frame_num = (abs_off + 1023) / (1024 as u64);
+                let frame_num = (abs_off + 1023) / 1024_u64;
 
                 // println!("flac frame: pts {}, abs_off {}, frame number {}", abs_ts, abs_off, frame_num);
 
@@ -91,8 +91,8 @@ pub fn make_flacenc() -> gst::Element {
                     odata[5] = (0b10000000 | ((frame_num >> 24) & 0b00111111)) as u8;
                     odata[6] = (0b10000000 | ((frame_num >> 18) & 0b00111111)) as u8;
                     odata[7] = (0b10000000 | ((frame_num >> 12) & 0b00111111)) as u8;
-                    odata[8] = (0b10000000 | ((frame_num >> 06) & 0b00111111)) as u8;
-                    odata[9] = (0b10000000 | ((frame_num >> 00) & 0b00111111)) as u8;
+                    odata[8] = (0b10000000 | ((frame_num >> 6) & 0b00111111)) as u8;
+                    odata[9] = (0b10000000 | (frame_num & 0b00111111)) as u8;
                     odata[10] = crc8(&odata[0..10]); // update header checksum
                     odata[11..].copy_from_slice(&in_data[4 + frame_num_size + 1..]);
 
