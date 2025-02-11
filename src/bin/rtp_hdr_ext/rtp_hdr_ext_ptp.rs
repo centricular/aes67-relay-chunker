@@ -42,7 +42,7 @@ impl ElementImpl for RTPHeaderExtPTP {
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
             gst::subclass::ElementMetadata::new(
                 "Custom RTP Header Extension for PTP timestamps",
-                &gst_rtp::RTP_HDREXT_ELEMENT_CLASS,
+                gst_rtp::RTP_HDREXT_ELEMENT_CLASS,
                 "Custom RTP Header Extension for PTP timestamps",
                 "Tim-Philipp Müller <tim@centricular.com>",
             )
