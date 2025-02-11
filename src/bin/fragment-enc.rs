@@ -456,119 +456,116 @@ for reproducibility",
 
                 use gst::EventView;
 
-                match ev.view() {
-                    EventView::CustomDownstream(ev_custom) => {
-                        let s = ev_custom.structure().unwrap();
-                        match s.name().as_str() {
-                            "chunk-start" => collector.frames.clear(),
-                            "chunk-end" => {
-                                let continuity_counter =
-                                    s.get::<u64>("continuity-counter").unwrap();
+                if let EventView::CustomDownstream(ev_custom) = ev.view() {
+                    let s = ev_custom.structure().unwrap();
+                    match s.name().as_str() {
+                        "chunk-start" => collector.frames.clear(),
+                        "chunk-end" => {
+                            let continuity_counter =
+                                s.get::<u64>("continuity-counter").unwrap();
 
-                                let chunk_num = s.get::<u64>("chunk-num").unwrap();
+                            let chunk_num = s.get::<u64>("chunk-num").unwrap();
 
-                                let _abs_offset = s.get::<u64>("offset").unwrap();
-                                let pts = s.get::<u64>("pts").unwrap();
+                            let _abs_offset = s.get::<u64>("offset").unwrap();
+                            let pts = s.get::<u64>("pts").unwrap();
 
-                                // Note that currently the chunk-end event is
-                                // only pushed through the audio encoder on
-                                // the next chunk, so we have one chunk delay
-                                // on the output side here until we can work
-                                // around that. (FIXME: even more if there's
-                                // packet loss, although we could probably send
-                                // a gap event or drain the encoder if that
-                                // happens anyway)
+                            // Note that currently the chunk-end event is
+                            // only pushed through the audio encoder on
+                            // the next chunk, so we have one chunk delay
+                            // on the output side here until we can work
+                            // around that. (FIXME: even more if there's
+                            // packet loss, although we could probably send
+                            // a gap event or drain the encoder if that
+                            // happens anyway)
 
-                                let buf = if mux_mpegts {
-                                    let chunk = fragment_enc::mpegts::write_ts_chunk(
-                                        &collector.frames,
-                                        chunk_num,
-                                    );
-
-                                    gst::Buffer::from_slice(chunk)
-                                } else {
-                                    // N.B. in case of FLAC the first few frames
-                                    // are header frames without a timestamp. We
-                                    // should probably extract those and prepend
-                                    // them to each individual chunk (TODO)
-                                    let mut adapter = gst_base::UniqueAdapter::new();
-                                    for frame in &collector.frames {
-                                        adapter.push(frame.buffer.clone());
-                                        //println!("Pushed buffer {:?}", frame.buffer);
-                                    }
-                                    adapter.take_buffer(adapter.available()).unwrap()
-                                };
-
-                                let map = buf.map_readable();
-                                let buf_data = map.unwrap();
-                                let digest = md5::compute(buf_data.as_slice());
-
-                                // Create output filename for the chunk
-                                let chunk_fn = if let Some(fn_pattern) = &output_pattern {
-                                    // The chunk numbers will vary depending on the frames per chunk,
-                                    // so add that to the filename to avoid confusion when the config
-                                    // changes. Also, this makes it possible to calculate an absolute
-                                    // sample offset from the chunk number and frames per chunk, which
-                                    // in turn allows deducing the absolute timestamp of the chunk.
-                                    // Note: We've already checked that the pattern contains '{num}'.
-                                    let fname = fn_pattern.replace(
-                                        "{num}",
-                                        &format!("{chunk_num}@{frames_per_chunk}"),
-                                    );
-
-                                    Some(fname)
-                                } else {
-                                    None
-                                };
-
-                                let continuous_encoded_frames =
-                                    continuity_counter * frames_per_chunk as u64;
-
-                                let drop_chunk =
-                                    continuous_encoded_frames < encoder_stabilisation_frames;
-
-                                let msg = if drop_chunk {
-                                    format!("continuity {}, discard", continuity_counter)
-                                } else if let Some(fname) = &chunk_fn {
-                                    format!("file {fname}")
-                                } else {
-                                    "".to_string()
-                                };
-
-                                println!("{:?}: {:?} {}", pts, digest, msg);
-
-                                gst::info!(
-                                    CAT,
-                                    obj = appsink.upcast_ref::<gst::Element>(),
-                                    "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
-                                    pts,
-                                    digest,
-                                    buf_data.size(),
-                                    continuity_counter,
+                            let buf = if mux_mpegts {
+                                let chunk = fragment_enc::mpegts::write_ts_chunk(
+                                    &collector.frames,
+                                    chunk_num,
                                 );
 
-                                if !drop_chunk {
-                                    // Write chunk to file
-                                    if let Some(filename) = &chunk_fn {
-                                        match File::create(&filename) {
-                                            Ok(mut file) => {
-                                                if let Err(err) = file.write(buf_data.as_slice()) {
-                                                    eprintln!(
-                                                        "ERROR writing file {filename}: {err}"
-                                                    );
-                                                }
+                                gst::Buffer::from_slice(chunk)
+                            } else {
+                                // N.B. in case of FLAC the first few frames
+                                // are header frames without a timestamp. We
+                                // should probably extract those and prepend
+                                // them to each individual chunk (TODO)
+                                let mut adapter = gst_base::UniqueAdapter::new();
+                                for frame in &collector.frames {
+                                    adapter.push(frame.buffer.clone());
+                                    //println!("Pushed buffer {:?}", frame.buffer);
+                                }
+                                adapter.take_buffer(adapter.available()).unwrap()
+                            };
+
+                            let map = buf.map_readable();
+                            let buf_data = map.unwrap();
+                            let digest = md5::compute(buf_data.as_slice());
+
+                            // Create output filename for the chunk
+                            let chunk_fn = if let Some(fn_pattern) = &output_pattern {
+                                // The chunk numbers will vary depending on the frames per chunk,
+                                // so add that to the filename to avoid confusion when the config
+                                // changes. Also, this makes it possible to calculate an absolute
+                                // sample offset from the chunk number and frames per chunk, which
+                                // in turn allows deducing the absolute timestamp of the chunk.
+                                // Note: We've already checked that the pattern contains '{num}'.
+                                let fname = fn_pattern.replace(
+                                    "{num}",
+                                    &format!("{chunk_num}@{frames_per_chunk}"),
+                                );
+
+                                Some(fname)
+                            } else {
+                                None
+                            };
+
+                            let continuous_encoded_frames =
+                                continuity_counter * frames_per_chunk as u64;
+
+                            let drop_chunk =
+                                continuous_encoded_frames < encoder_stabilisation_frames;
+
+                            let msg = if drop_chunk {
+                                format!("continuity {}, discard", continuity_counter)
+                            } else if let Some(fname) = &chunk_fn {
+                                format!("file {fname}")
+                            } else {
+                                "".to_string()
+                            };
+
+                            println!("{:?}: {:?} {}", pts, digest, msg);
+
+                            gst::info!(
+                                CAT,
+                                obj = appsink.upcast_ref::<gst::Element>(),
+                                "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
+                                pts,
+                                digest,
+                                buf_data.size(),
+                                continuity_counter,
+                            );
+
+                            if !drop_chunk {
+                                // Write chunk to file
+                                if let Some(filename) = &chunk_fn {
+                                    match File::create(filename) {
+                                        Ok(mut file) => {
+                                            if let Err(err) = file.write(buf_data.as_slice()) {
+                                                eprintln!(
+                                                    "ERROR writing file {filename}: {err}"
+                                                );
                                             }
-                                            Err(ref err) => {
-                                                eprintln!("ERROR creating file {filename}: {err}");
-                                            }
+                                        }
+                                        Err(ref err) => {
+                                            eprintln!("ERROR creating file {filename}: {err}");
                                         }
                                     }
                                 }
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
 
                 true
