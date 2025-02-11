@@ -200,12 +200,14 @@ fn main() {
                 .help("Bitrate of encoded audio for lossy formats, in bits per second")
                 .num_args(1)
                 .value_name("BITRATE")
+                .value_parser(clap::value_parser!(i32))
         )
         .arg(
             Arg::new("frames-per-chunk")
                 .short('f')
                 .long("frames-per-chunk")
                 .help("How many (encoded) frames of 1024 samples there should be per output audio chunk")
+                .value_parser(clap::value_parser!(u32))
                 .default_value("150"),
         )
         .arg(
@@ -223,7 +225,7 @@ for reproducibility",
         )
         .get_matches();
 
-    let input_uri = matches.get_one::<&str>("input-uri").unwrap();
+    let input_uri = matches.get_one::<String>("input-uri").unwrap();
 
     let input_url = url::Url::parse(input_uri)
         .inspect_err(|_err| {
@@ -297,9 +299,9 @@ for reproducibility",
     // mp3/aac encoder that will do way worse things to the audio anyway.
     conv.set_property_from_str("dithering", "none");
 
-    let encoding = *matches.get_one::<&str>("encoding").unwrap();
+    let encoding = matches.get_one::<String>("encoding").unwrap();
 
-    let (enc, enc_caps) = match encoding {
+    let (enc, enc_caps) = match encoding.as_str() {
         "aac-fdk" | "ts-aac-fdk" => {
             let aacenc = gst::ElementFactory::make("fdkaacenc").build().unwrap();
             aacenc.set_property("perfect-timestamp", false);
@@ -354,7 +356,7 @@ for reproducibility",
     };
 
     // How many frames does the encoder need to "stabilise" the bitstream?
-    let encoder_stabilisation_frames = match encoding {
+    let encoder_stabilisation_frames = match encoding.as_str() {
         "none" | "flac" => 0,
         "aac-fdk" | "ts-aac-fdk" => 100,
         "heaacv1-fdk" | "ts-heaacv1-fdk" => 100, // FIXME: untested
@@ -391,9 +393,10 @@ for reproducibility",
     }
 
     let output_pattern = matches
-        .get_one::<&str>("output-pattern")
+        .get_one::<String>("output-pattern")
         .map(|s| s.to_string());
-    if let Some(ref opattern) = output_pattern {
+
+    if let Some(opattern) = &output_pattern {
         if !opattern.contains("{num}") {
             eprintln!("Provided filename output pattern does not contain '{{num}}'!");
             return;
