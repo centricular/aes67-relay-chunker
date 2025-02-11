@@ -49,7 +49,7 @@ pub fn make_flacenc() -> gst::Element {
                     .mul_div_floor(sample_rate as u64, *gst::ClockTime::SECOND)
                     .unwrap();
 
-                let frame_num = (abs_off + 1023) / 1024_u64;
+                let frame_num = abs_off.div_ceil(1024);
 
                 // println!("flac frame: pts {}, abs_off {}, frame number {}", abs_ts, abs_off, frame_num);
 
