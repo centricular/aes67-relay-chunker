@@ -418,6 +418,21 @@ impl AudioChunker {
                 continue;
             }
 
+            // Remove GstReferenceTimestampMetas from buffers, otherwise our output buffer will
+            // have thousands of those on it, and we don't need those any more here anyway.
+            {
+                use gst::buffer::BufferMetaForeachAction;
+                use std::ops::ControlFlow::*;
+
+                buffer.get_mut().unwrap().foreach_meta_mut(|mut meta| {
+                    if meta.downcast_ref::<gst::ReferenceTimestampMeta>().is_some() {
+                        Continue(BufferMetaForeachAction::Remove)
+                    } else {
+                        Continue(BufferMetaForeachAction::Keep)
+                    }
+                });
+            }
+
             // Buffer aligns with expected next sample in chunk
             assert_eq!(abs_off, chunk_pos_off);
 
