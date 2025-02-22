@@ -22,12 +22,8 @@ use gst_rtp::prelude::RTPHeaderExtensionExt;
 
 use once_cell::sync::Lazy;
 
-use atomic_refcell::AtomicRefCell;
-
 use std::fs::File;
 use std::io::prelude::*;
-
-use std::sync::Arc;
 
 use url::Url;
 
@@ -408,13 +404,12 @@ for reproducibility",
         .dynamic_cast::<gst_app::AppSink>()
         .expect("Sink element is expected to be an appsink!");
 
-    // Todo: can probably drop the Arc here now
-    let chunk_collector = Arc::new(AtomicRefCell::new(ChunkCollector { frames: vec![] }));
+    let mut chunk_collector = ChunkCollector { frames: vec![] };
 
     appsink.set_callbacks(
         gst_app::AppSinkCallbacks::builder()
             .new_sample(move |appsink| {
-                let mut collector = chunk_collector.borrow_mut();
+                let collector = &mut chunk_collector;
 
                 let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                 let buf = sample.buffer().unwrap().copy();
