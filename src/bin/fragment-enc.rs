@@ -1,6 +1,6 @@
 // fragment-enc
 //
-// Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
+// Copyright (C) 2022-2025 Tim-Philipp Müller <tim centricular com>
 //
 // This Source Code Form is subject to the terms of the Mozilla Public License, v2.0.
 // If a copy of the MPL was not distributed with this file, You can obtain one at
@@ -408,9 +408,8 @@ for reproducibility",
         .dynamic_cast::<gst_app::AppSink>()
         .expect("Sink element is expected to be an appsink!");
 
+    // Todo: can probably drop the Arc here now
     let chunk_collector = Arc::new(AtomicRefCell::new(ChunkCollector { frames: vec![] }));
-
-    let cc_clone = chunk_collector.clone();
 
     appsink.set_callbacks(
         gst_app::AppSinkCallbacks::builder()
@@ -419,6 +418,40 @@ for reproducibility",
 
                 let sample = appsink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
                 let buf = sample.buffer().unwrap().copy();
+
+                // Copy start or end chunk info if present, disentangle struct from buffer lifetime
+
+                let start_info = gst::meta::CustomMeta::from_buffer(&buf, "X-ChunkStartMeta")
+                    .map(|meta| gst::Structure::from_iter("chunk-start",
+                        meta.structure()
+                            .iter()
+                            .map(|(n,v)| (n, v.clone()))
+                        )
+                    )
+                    .ok();
+
+                let end_info = gst::meta::CustomMeta::from_buffer(&buf, "X-ChunkEndMeta")
+                    .map(|meta| gst::Structure::from_iter("chunk-end",
+                        meta.structure()
+                            .iter()
+                            .map(|(n,v)| (n, v.clone()))
+                        )
+                    )
+                    .ok();
+
+                // Start of chunk?
+
+                if let Some(start_info) = start_info {
+                    gst::info!(
+                        CAT,
+                        obj = appsink.upcast_ref::<gst::Element>(),
+                        "{start_info:?}",
+                    );
+
+                    collector.frames.clear();
+                }
+
+                // Process encoded audio frame
 
                 gst::trace!(
                     CAT,
@@ -449,129 +482,111 @@ for reproducibility",
                     format: frame_format,
                 });
 
-                Ok(gst::FlowSuccess::Ok)
-            })
-            .new_event(move |appsink| {
-                let mut collector = cc_clone.borrow_mut();
+                // End of chunk?
 
-                let event = appsink.pull_object().unwrap();
-                let ev = event.downcast::<gst::Event>().ok().unwrap();
+                if let Some(end_info) = end_info {
+                    gst::info!(
+                        CAT,
+                        obj = appsink.upcast_ref::<gst::Element>(),
+                        "{end_info:?}",
+                    );
 
-                use gst::EventView;
+                    let continuity_counter = end_info.get::<u64>("continuity-counter").unwrap();
 
-                if let EventView::CustomDownstream(ev_custom) = ev.view() {
-                    let s = ev_custom.structure().unwrap();
-                    match s.name().as_str() {
-                        "chunk-start" => collector.frames.clear(),
-                        "chunk-end" => {
-                            let continuity_counter =
-                                s.get::<u64>("continuity-counter").unwrap();
+                    let chunk_num = end_info.get::<u64>("chunk-num").unwrap();
 
-                            let chunk_num = s.get::<u64>("chunk-num").unwrap();
+                    let _abs_offset = end_info.get::<u64>("offset").unwrap();
+                    let pts = end_info.get::<u64>("pts").unwrap();
 
-                            let _abs_offset = s.get::<u64>("offset").unwrap();
-                            let pts = s.get::<u64>("pts").unwrap();
 
-                            // Note that currently the chunk-end event is
-                            // only pushed through the audio encoder on
-                            // the next chunk, so we have one chunk delay
-                            // on the output side here until we can work
-                            // around that. (FIXME: even more if there's
-                            // packet loss, although we could probably send
-                            // a gap event or drain the encoder if that
-                            // happens anyway)
+                    let buf = if mux_mpegts {
+                        let chunk = fragment_enc::mpegts::write_ts_chunk(
+                            &collector.frames,
+                            chunk_num,
+                        );
 
-                            let buf = if mux_mpegts {
-                                let chunk = fragment_enc::mpegts::write_ts_chunk(
-                                    &collector.frames,
-                                    chunk_num,
-                                );
+                        gst::Buffer::from_slice(chunk)
+                    } else {
+                        // N.B. in case of FLAC the first few frames
+                        // are header frames without a timestamp. We
+                        // should probably extract those and prepend
+                        // them to each individual chunk (TODO)
+                        let mut adapter = gst_base::UniqueAdapter::new();
+                        for frame in &collector.frames {
+                            adapter.push(frame.buffer.clone());
+                            //println!("Pushed buffer {:?}", frame.buffer);
+                        }
+                        adapter.take_buffer(adapter.available()).unwrap()
+                    };
 
-                                gst::Buffer::from_slice(chunk)
-                            } else {
-                                // N.B. in case of FLAC the first few frames
-                                // are header frames without a timestamp. We
-                                // should probably extract those and prepend
-                                // them to each individual chunk (TODO)
-                                let mut adapter = gst_base::UniqueAdapter::new();
-                                for frame in &collector.frames {
-                                    adapter.push(frame.buffer.clone());
-                                    //println!("Pushed buffer {:?}", frame.buffer);
-                                }
-                                adapter.take_buffer(adapter.available()).unwrap()
-                            };
+                    let map = buf.map_readable();
+                    let buf_data = map.unwrap();
+                    let digest = md5::compute(buf_data.as_slice());
 
-                            let map = buf.map_readable();
-                            let buf_data = map.unwrap();
-                            let digest = md5::compute(buf_data.as_slice());
+                    // Create output filename for the chunk
+                    let chunk_fn = if let Some(fn_pattern) = &output_pattern {
+                        // The chunk numbers will vary depending on the frames per chunk,
+                        // so add that to the filename to avoid confusion when the config
+                        // changes. Also, this makes it possible to calculate an absolute
+                        // sample offset from the chunk number and frames per chunk, which
+                        // in turn allows deducing the absolute timestamp of the chunk.
+                        // Note: We've already checked that the pattern contains '{num}'.
+                        let fname = fn_pattern.replace(
+                            "{num}",
+                            &format!("{chunk_num}@{frames_per_chunk}"),
+                        );
 
-                            // Create output filename for the chunk
-                            let chunk_fn = if let Some(fn_pattern) = &output_pattern {
-                                // The chunk numbers will vary depending on the frames per chunk,
-                                // so add that to the filename to avoid confusion when the config
-                                // changes. Also, this makes it possible to calculate an absolute
-                                // sample offset from the chunk number and frames per chunk, which
-                                // in turn allows deducing the absolute timestamp of the chunk.
-                                // Note: We've already checked that the pattern contains '{num}'.
-                                let fname = fn_pattern.replace(
-                                    "{num}",
-                                    &format!("{chunk_num}@{frames_per_chunk}"),
-                                );
+                        Some(fname)
+                    } else {
+                        None
+                    };
 
-                                Some(fname)
-                            } else {
-                                None
-                            };
+                    let continuous_encoded_frames =
+                        continuity_counter * frames_per_chunk as u64;
 
-                            let continuous_encoded_frames =
-                                continuity_counter * frames_per_chunk as u64;
+                    let drop_chunk =
+                        continuous_encoded_frames < encoder_stabilisation_frames;
 
-                            let drop_chunk =
-                                continuous_encoded_frames < encoder_stabilisation_frames;
+                    let msg = if drop_chunk {
+                        format!("continuity {}, discard", continuity_counter)
+                    } else if let Some(fname) = &chunk_fn {
+                        format!("file {fname}")
+                    } else {
+                        "".to_string()
+                    };
 
-                            let msg = if drop_chunk {
-                                format!("continuity {}, discard", continuity_counter)
-                            } else if let Some(fname) = &chunk_fn {
-                                format!("file {fname}")
-                            } else {
-                                "".to_string()
-                            };
+                    println!("{:?}: {:?} {}", pts, digest, msg);
 
-                            println!("{:?}: {:?} {}", pts, digest, msg);
+                    gst::info!(
+                        CAT,
+                        obj = appsink.upcast_ref::<gst::Element>(),
+                        "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
+                        pts,
+                        digest,
+                        buf_data.size(),
+                        continuity_counter,
+                    );
 
-                            gst::info!(
-                                CAT,
-                                obj = appsink.upcast_ref::<gst::Element>(),
-                                "chunk @ pts {:?}, digest {:?}, size {} bytes, continuity {}",
-                                pts,
-                                digest,
-                                buf_data.size(),
-                                continuity_counter,
-                            );
-
-                            if !drop_chunk {
-                                // Write chunk to file
-                                if let Some(filename) = &chunk_fn {
-                                    match File::create(filename) {
-                                        Ok(mut file) => {
-                                            if let Err(err) = file.write(buf_data.as_slice()) {
-                                                eprintln!(
-                                                    "ERROR writing file {filename}: {err}"
-                                                );
-                                            }
-                                        }
-                                        Err(ref err) => {
-                                            eprintln!("ERROR creating file {filename}: {err}");
-                                        }
+                    if !drop_chunk {
+                        // Write chunk to file
+                        if let Some(filename) = &chunk_fn {
+                            match File::create(filename) {
+                                Ok(mut file) => {
+                                    if let Err(err) = file.write(buf_data.as_slice()) {
+                                        eprintln!(
+                                            "ERROR writing file {filename}: {err}"
+                                        );
                                     }
+                                }
+                                Err(ref err) => {
+                                    eprintln!("ERROR creating file {filename}: {err}");
                                 }
                             }
                         }
-                        _ => {}
                     }
                 }
 
-                true
+                Ok(gst::FlowSuccess::Ok)
             })
             .build(),
     );
