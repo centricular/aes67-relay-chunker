@@ -1,6 +1,6 @@
 // Raw audio chunker - creates chunks of raw audio aligned based on absolute timestamps
 //
-// Copyright (C) 2022 Tim-Philipp Müller <tim centricular com>
+// Copyright (C) 2022-2025 Tim-Philipp Müller <tim centricular com>
 //
 // This Source Code Form is subject to the terms of the Mozilla Public License, v2.0.
 // If a copy of the MPL was not distributed with this file, You can obtain one at
@@ -13,6 +13,8 @@ use gst::prelude::*;
 use gst::subclass::prelude::*;
 
 use once_cell::sync::Lazy;
+
+use smallvec::SmallVec;
 
 use std::sync::Mutex;
 
@@ -71,6 +73,78 @@ impl State {
     }
 }
 
+#[derive(Debug)]
+struct TsOffset {
+    size: usize,
+    pts: gst::ClockTime,
+    dur: gst::ClockTime,
+    offset: u64,
+    offset_end: u64,
+}
+
+impl TsOffset {
+    fn from_samples(offset: u64, n_samples: u64, rate: u32, bpf: u32) -> Self {
+        let rate = rate as u64;
+        let bpf = bpf as u64;
+
+        let size = n_samples * bpf;
+
+        let pts = offset
+            .mul_div_round(*gst::ClockTime::SECOND, rate)
+            .map(gst::ClockTime::from_nseconds)
+            .unwrap();
+
+        let dur = n_samples
+            .mul_div_round(*gst::ClockTime::SECOND, rate)
+            .map(gst::ClockTime::from_nseconds)
+            .unwrap();
+
+        let offset_end = offset + n_samples;
+
+        Self {
+            size: size as usize,
+            pts,
+            dur,
+            offset,
+            offset_end,
+        }
+    }
+}
+
+struct TsOffsetIter<'a> {
+    offset: u64,
+    samples: &'a [u64],
+    rate: u32,
+    bpf: u32,
+}
+
+impl<'a> TsOffsetIter<'a> {
+    fn new(offset: u64, samples: &'a [u64], rate: u32, bpf: u32) -> Self {
+        Self {
+            offset,
+            samples,
+            rate,
+            bpf,
+        }
+    }
+}
+
+impl Iterator for TsOffsetIter<'_> {
+    type Item = TsOffset;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let n_samples = *self.samples.first()?;
+
+        let offset = self.offset;
+        self.samples = &self.samples[1..];
+        self.offset += n_samples;
+
+        Some(TsOffset::from_samples(
+            offset, n_samples, self.rate, self.bpf,
+        ))
+    }
+}
+
 pub struct AudioChunker {
     srcpad: gst::Pad,
     sinkpad: gst::Pad,
@@ -107,6 +181,12 @@ impl ObjectSubclass for AudioChunker {
             })
             .flags(gst::PadFlags::PROXY_CAPS)
             .build();
+
+        assert!(!gst::meta::CustomMeta::is_registered("X-ChunkStartMeta"));
+        gst::meta::CustomMeta::register("X-ChunkStartMeta", &["audio"]);
+
+        assert!(!gst::meta::CustomMeta::is_registered("X-ChunkEndMeta"));
+        gst::meta::CustomMeta::register("X-ChunkEndMeta", &["audio"]);
 
         Self {
             sinkpad,
@@ -467,19 +547,9 @@ impl AudioChunker {
                 state.adapter.available()
             );
 
-            let mut outbuf = state.adapter.take_buffer(chunk_size).unwrap();
-
-            let outbuf_ref = outbuf.get_mut().unwrap();
-
             let continuity_counter = state.continuity_counter;
-            if continuity_counter == 0 {
-                outbuf_ref.set_flags(gst::BufferFlags::DISCONT);
-            } else {
-                outbuf_ref.unset_flags(gst::BufferFlags::DISCONT);
-            }
 
-            outbuf_ref.set_offset(chunk_start_off);
-            outbuf_ref.set_offset_end(chunk_end_off);
+            let discont = continuity_counter == 0;
 
             let chunk_pts = chunk_start_off
                 .mul_div_round(*gst::ClockTime::SECOND, state.info.rate() as u64)
@@ -491,45 +561,76 @@ impl AudioChunker {
                 .map(gst::ClockTime::from_nseconds)
                 .unwrap();
 
-            let chunk_duration = chunk_end_pts - chunk_pts;
+            let _chunk_duration = chunk_end_pts - chunk_pts;
 
-            outbuf_ref.set_duration(chunk_duration);
-            outbuf_ref.set_pts(chunk_pts);
-            outbuf_ref.set_dts(None);
+            let chunk_number = abs_off / samples_per_chunk;
+
+            // Split chunk into three output buffers (480 samples each for the first and last one,
+            // with the middle buffer carrying the rest), so we can set custom metas on the
+            // first and last buffers. The audio encoder will then pass through those metas on the
+            // output side, which will be much smaller encoded frames (of 1024 samples). The
+            // fragment encoder can then tell which output chunk the encoded audio frames belong
+            // to via the start/end custom metas. 480 samples is a somewhat arbitrary value, it's
+            // been chosen to create clean durations/offsets with 48kHz, but could have been
+            // anything else as long as it's <= 1024.
+            let buffer_samples = [480, chunk_end_off - chunk_start_off - 2 * 480, 480];
+
+            let ts_iter = TsOffsetIter::new(
+                chunk_start_off,
+                &buffer_samples,
+                state.info.rate(),
+                state.info.bpf(),
+            );
+
+            let mut bufs: SmallVec<[gst::Buffer; 3]> = SmallVec::new();
+
+            for (i, details) in ts_iter.enumerate() {
+                gst::info!(CAT, imp = self, "{i}: {details:?}");
+
+                let mut outbuf = state.adapter.take_buffer(details.size).unwrap();
+                {
+                    let outbuf_ref = outbuf.get_mut().unwrap();
+
+                    outbuf_ref.set_pts(details.pts);
+                    outbuf_ref.set_duration(details.dur);
+                    outbuf_ref.set_offset(details.offset);
+                    outbuf_ref.set_offset_end(details.offset_end);
+
+                    if i == 0 && discont {
+                        outbuf_ref.set_flags(gst::BufferFlags::DISCONT);
+                    } else {
+                        outbuf_ref.unset_flags(gst::BufferFlags::DISCONT);
+                    }
+
+                    let meta_name = match i {
+                        0 => Some("X-ChunkStartMeta"),
+                        2 => Some("X-ChunkEndMeta"),
+                        _ => None,
+                    };
+
+                    if let Some(meta_name) = meta_name {
+                        let mut meta = gst::meta::CustomMeta::add(outbuf_ref, meta_name).unwrap();
+
+                        let s = meta.mut_structure();
+                        s.set("chunk-num", chunk_number);
+                        s.set("offset", abs_off);
+                        s.set("pts", chunk_pts);
+                        s.set("continuity-counter", continuity_counter);
+                        gst::info!(CAT, imp = self, "{i}: {s:?}");
+                    };
+                }
+
+                bufs.push(outbuf);
+            }
 
             // Drop state lock before we push out events/buffers
             drop(state_guard);
 
-            // Push some serialised custom events before/after each chunk,
-            // so we can still determine chunk boundaries after the audio
-            // encoder (which will output smaller frames) and muxer, and
-            // collect all coded packets belonging to the same input chunk.
-            let s = gst::Structure::builder("chunk-start")
-                .field("chunk-num", abs_off / samples_per_chunk)
-                .field("offset", abs_off)
-                .field("pts", chunk_pts)
-                .field("continuity-counter", continuity_counter)
-                .build();
+            for outbuf in bufs.drain(..) {
+                gst::log!(CAT, imp = self, "Pushing buffer {:?}", outbuf);
 
-            self.srcpad.push_event(gst::event::CustomDownstream::new(s));
-
-            // TODO: put continuity counter on outgoing chunks, or flag all
-            // buffers with a continuity counter value < 5 as DROPPABLE or
-            // something, so that we can later drop the first few encoded
-            // chunks to make sure the encoder has stabilised its output.
-
-            gst::log!(CAT, imp = self, "Pushing buffer {:?}", outbuf);
-
-            self.srcpad.push(outbuf)?;
-
-            let s = gst::Structure::builder("chunk-end")
-                .field("chunk-num", abs_off / samples_per_chunk)
-                .field("offset", abs_off)
-                .field("pts", chunk_pts)
-                .field("continuity-counter", continuity_counter)
-                .build();
-
-            self.srcpad.push_event(gst::event::CustomDownstream::new(s));
+                self.srcpad.push(outbuf)?;
+            }
 
             // Re-acquire state
             state_guard = self.state.lock().unwrap();
